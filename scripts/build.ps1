@@ -2,7 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $packageName = "SmartAdvisorAutomation"
-$version = "0.2.1"
+$version = "0.2.2"
+$architecture = python -c "import struct; print('x64' if struct.calcsize('P') == 8 else 'x86')"
+$artifactName = "$packageName-$version-$architecture"
 Push-Location $repositoryRoot
 
 try {
@@ -17,7 +19,7 @@ try {
         src/smartadvisor_automation/app.py
 
     $packageDirectory = Join-Path $repositoryRoot "dist\$packageName"
-    $archivePath = Join-Path $repositoryRoot "dist\$packageName-$version.zip"
+    $archivePath = Join-Path $repositoryRoot "dist\$artifactName.zip"
 
     if (Test-Path -LiteralPath $archivePath) {
         Remove-Item -LiteralPath $archivePath -Force
@@ -39,7 +41,7 @@ try {
         --clean `
         --windowed `
         --onefile `
-        --name "$packageName-$version" `
+        --name $artifactName `
         --specpath $oneFileBuildDirectory `
         --workpath $oneFileBuildDirectory `
         --distpath release `
@@ -51,7 +53,7 @@ try {
     Write-Output "Transfer archive: $archivePath"
     Write-Output (
         "Standalone executable: " +
-        (Join-Path $repositoryRoot "release\$packageName-$version.exe")
+        (Join-Path $repositoryRoot "release\$artifactName.exe")
     )
 }
 finally {

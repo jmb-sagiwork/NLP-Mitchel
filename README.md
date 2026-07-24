@@ -62,13 +62,17 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.2.1.zip
-release\SmartAdvisorAutomation-0.2.1.exe
+dist\SmartAdvisorAutomation-0.2.2-x86.zip
+release\SmartAdvisorAutomation-0.2.2-x86.exe
 ```
 
 The ZIP contains the supported one-folder package. The standalone EXE is
 committed for direct download and may start more slowly because it extracts
 its runtime to a temporary directory.
+
+The committed release is built with 32-bit Python to match the 32-bit
+SmartAdvisor WinForms process. GitHub Actions verifies that the executable's PE
+machine type is `0x014c` (x86) before publishing the artifact.
 
 ## Test
 

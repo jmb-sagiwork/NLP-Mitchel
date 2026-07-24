@@ -1,0 +1,56 @@
+name: Build x86 executable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-x86:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up 32-bit Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x86"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest
+
+      - name: Build standalone executable
+        shell: powershell
+        run: .\scripts\build.ps1
+
+      - name: Verify x86 PE machine type
+        shell: python
+        run: |
+          import struct
+          from pathlib import Path
+
+          executable = Path(
+              "release/SmartAdvisorAutomation-0.2.2-x86.exe"
+          )
+          data = executable.read_bytes()
+          pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+          machine = struct.unpack_from("<H", data, pe_offset + 4)[0]
+          assert machine == 0x014C, f"Expected x86 PE, got {machine:#06x}"
+          print(f"Verified x86 PE: {executable}")
+
+      - name: Upload x86 executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartAdvisorAutomation-0.2.2-x86
+          path: release/SmartAdvisorAutomation-0.2.2-x86.exe
+          if-no-files-found: error
+          retention-days: 30
+
