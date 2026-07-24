@@ -5,12 +5,14 @@ __pycache__/
 build/
 dist/
 reports/
+SmartAdvisor*_object_report*.txt
+SmartAdvisor-object-report*.json
 *.spec
 *.log
 
 # Commit only the approved standalone release executable.
 release/*
-!release/SmartAdvisorAutomation-0.2.3-x86.exe
+!release/SmartAdvisorAutomation-0.2.4-x86.exe
 !release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
 
 # Local agent and generated analysis data

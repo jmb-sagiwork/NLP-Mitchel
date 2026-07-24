@@ -36,7 +36,9 @@ Attachment then follows the stable parent hierarchy:
 `Open Bill` window → `Frame1` / `Enter Bill To Edit` group → `cboClient`.
 
 The attach probe searches visible top-level windows owned by the discovered
-SmartAdvisor process before falling back to the main-window descendant chain.
+SmartAdvisor process and selects exact UIA `AutomationId=frmBillOpen`. It then
+walks direct UIA children to `AutomationId=Frame1` and verifies the direct
+`AutomationId=cboClient` ComboBox before attaching. HWND values remain dynamic.
 
 ## Object extractor
 
@@ -82,8 +84,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.2.3-x86.zip
-release\SmartAdvisorAutomation-0.2.3-x86.exe
+dist\SmartAdvisorAutomation-0.2.4-x86.zip
+release\SmartAdvisorAutomation-0.2.4-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 ```
 

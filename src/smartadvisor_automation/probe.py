@@ -6,8 +6,10 @@ from typing import Any, Iterable
 from smartadvisor_automation.models import ControlSpec, ProbeResult
 from smartadvisor_automation.selectors import (
     NO_BILL_ON_FILE_CONTROLS,
+    OPEN_BILL_CLIENT_AUTOMATION_ID,
     OPEN_BILL_FRAME_AUTOMATION_ID,
     OPEN_BILL_FRAME_NAME,
+    OPEN_BILL_WINDOW_AUTOMATION_ID,
     OPEN_BILL_WINDOW_TITLE,
     SMARTADVISOR_WINDOW_CLASS_PREFIX,
     SMARTADVISOR_WINDOW_TITLE,
@@ -320,6 +322,148 @@ def _find_open_bill_process_window(
     return actionable[0] if len(actionable) == 1 else None
 
 
+def _direct_element_children(element_info: Any) -> list[Any]:
+    """Read one UIA level while preserving partial-tree reliability."""
+
+    try:
+        return list(element_info.children())
+    except Exception:
+        return []
+
+
+def _strict_uia_open_bill_frame(
+    desktop: Any,
+    main_window: Any,
+) -> Any | None:
+    """Resolve the exact hierarchy proven by the object extractor."""
+
+    process_id = getattr(main_window.element_info, "process_id", None)
+    if process_id is None:
+        return None
+
+    try:
+        process_windows = list(
+            desktop.windows(
+                process=int(process_id),
+                visible_only=True,
+                enabled_only=False,
+            )
+        )
+    except Exception:
+        return None
+
+    open_bill_matches = []
+    for window in process_windows:
+        info = window.element_info
+        if (
+            str(getattr(info, "automation_id", "") or "")
+            == OPEN_BILL_WINDOW_AUTOMATION_ID
+            and str(getattr(info, "name", "") or "").strip().casefold()
+            == OPEN_BILL_WINDOW_TITLE.casefold()
+            and str(getattr(info, "control_type", "") or "") == "Window"
+            and str(getattr(info, "class_name", "") or "").startswith(
+                SMARTADVISOR_WINDOW_CLASS_PREFIX
+            )
+        ):
+            open_bill_matches.append(window)
+
+    if len(open_bill_matches) != 1:
+        return None
+
+    frame_matches = []
+    for info in _direct_element_children(
+        open_bill_matches[0].element_info
+    ):
+        if (
+            str(getattr(info, "automation_id", "") or "")
+            == OPEN_BILL_FRAME_AUTOMATION_ID
+            and str(getattr(info, "name", "") or "").strip().casefold()
+            == OPEN_BILL_FRAME_NAME.casefold()
+            and str(getattr(info, "control_type", "") or "") == "Group"
+            and str(getattr(info, "class_name", "") or "").startswith(
+                SMARTADVISOR_WINDOW_CLASS_PREFIX
+            )
+        ):
+            frame_matches.append(info)
+
+    if len(frame_matches) != 1:
+        return None
+    frame_info = frame_matches[0]
+
+    client_matches = [
+        info
+        for info in _direct_element_children(frame_info)
+        if (
+            str(getattr(info, "automation_id", "") or "")
+            == OPEN_BILL_CLIENT_AUTOMATION_ID
+            and str(getattr(info, "control_type", "") or "")
+            == "ComboBox"
+            and str(getattr(info, "class_name", "") or "").startswith(
+                SMARTADVISOR_WINDOW_CLASS_PREFIX
+            )
+        )
+    ]
+    if len(client_matches) != 1:
+        return None
+
+    frame_handle = _safe_int_handle(
+        getattr(frame_info, "handle", None)
+    )
+    if frame_handle is None:
+        return None
+    try:
+        return desktop.window(handle=frame_handle)
+    except Exception:
+        return None
+
+
+def _safe_int_handle(value: object) -> int | None:
+    try:
+        handle = int(value)
+    except (TypeError, ValueError):
+        return None
+    return handle if handle else None
+
+
+def find_direct_uia_control(
+    backend: str,
+    parent: Any,
+    automation_id: str,
+) -> Any | None:
+    """Wrap one exact direct UIA child by its dynamic native handle."""
+
+    if backend != "uia":
+        return None
+    parent_info = getattr(parent, "element_info", None)
+    if parent_info is None:
+        return None
+
+    matches = [
+        info
+        for info in _direct_element_children(parent_info)
+        if (
+            str(getattr(info, "automation_id", "") or "")
+            == automation_id
+            and str(getattr(info, "class_name", "") or "").startswith(
+                SMARTADVISOR_WINDOW_CLASS_PREFIX
+            )
+        )
+    ]
+    if len(matches) != 1:
+        return None
+
+    handle = _safe_int_handle(getattr(matches[0], "handle", None))
+    if handle is None:
+        return None
+
+    from pywinauto import Desktop
+
+    try:
+        return Desktop(backend=backend).window(handle=handle)
+    except Exception:
+        return None
+
+
 def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
     """Handshake through Main System -> Open Bill -> Frame1."""
 
@@ -327,6 +471,14 @@ def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
 
     main_handle = _element_handle(main_window)
     desktop = Desktop(backend=backend)
+    if backend == "uia":
+        strict_frame = _strict_uia_open_bill_frame(
+            desktop,
+            main_window,
+        )
+        if strict_frame is not None:
+            return strict_frame
+
     open_bill = _find_open_bill_process_window(desktop, main_window)
 
     if open_bill is None and main_handle is not None:
@@ -458,7 +610,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.2.3",
+        "utility_version": "0.2.4",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

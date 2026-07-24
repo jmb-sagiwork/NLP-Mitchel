@@ -283,10 +283,10 @@ This section supersedes conflicting assumptions in the original plan.
 - Packager: PyInstaller one-file executable.
 - Required build architecture: x86 (`PE machine 0x014C`).
 - Current workflow executable:
-  `release/SmartAdvisorAutomation-0.2.3-x86.exe`.
+  `release/SmartAdvisorAutomation-0.2.4-x86.exe`.
 - Current diagnostic executable:
   `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
-- Current automated test count: 35 passing.
+- Current automated test count: 37 passing.
 - No Python installation is required in Citrix.
 - The executable must run inside the same Citrix Windows session as
   SmartAdvisor.
@@ -564,6 +564,81 @@ The published extractor was verified as:
   process behind;
 - current tests: 35 passing.
 
+### 11.9 Object report analyzed and 0.2.4 fix implemented
+
+The user returned `SmartAdvisorp_object_report_2.txt`. The extractor report was
+valid, complete, and privacy-redacted.
+
+Report summary:
+
+- discovery status: `found`;
+- matching SmartAdvisor main windows: 1;
+- observed SmartAdvisor process ID: `23176`;
+- process top-level windows: 12;
+- native trees: 12, all `ok`;
+- backend trees: 24 (12 UIA and 12 Win32), all `ok`;
+- traversal errors: 0;
+- truncated trees: 0.
+
+The process ID and HWNDs below are evidence from that capture only and must
+never be hard-coded.
+
+The report proved that the native main and Open Bill windows are separate
+top-level process roots:
+
+- main root HWND `1510120`, UIA `AutomationId=bilMain`;
+- Open Bill root HWND `1313322`, UIA `AutomationId=frmBillOpen`.
+
+The clean UIA tree rooted directly at Open Bill was:
+
+```text
+Open Bill
+AutomationId: frmBillOpen
+ControlType: Window
+HWND observed: 1313322
+└── Enter Bill To Edit
+    AutomationId: Frame1
+    ControlType: Group
+    HWND observed: 592642
+    └── [redacted name]
+        AutomationId: cboClient
+        ControlType: ComboBox
+        HWND observed: 854768
+```
+
+The same process tree was visible beneath the main UIA root, but native
+enumeration treated Open Bill as its own top-level window. Native text did not
+reliably expose `Enter Bill To Edit`. The Win32 backend exposed duplicate
+representations of `cboClient`, while UIA exposed one clean parent chain.
+
+This ruled out traversal permissions, provider crashes, and report truncation
+for the captured session. It identified the remaining failure as resolver
+strategy:
+
+- matching Open Bill by text was weaker than its exact automation ID;
+- wrapper-wide `descendants()` did not mirror the extractor's successful
+  node-by-node traversal;
+- native parent/name lookup could not represent the proven root boundary.
+
+Version 0.2.4 therefore:
+
+1. enumerates every visible top-level UIA window for the SmartAdvisor process;
+2. requires exact `AutomationId=frmBillOpen`, name `Open Bill`, control type
+   `Window`, and the WinForms class prefix;
+3. reads only the Open Bill element's direct UIA children;
+4. requires exactly one direct `AutomationId=Frame1`, name
+   `Enter Bill To Edit`, control type `Group`;
+5. reads only the Frame1 element's direct UIA children;
+6. requires exactly one direct `AutomationId=cboClient`, control type
+   `ComboBox`;
+7. wraps the dynamically discovered `cboClient` HWND as the step-1 scope,
+   avoiding another wrapper-wide descendant scan;
+8. retains the earlier fallback only if the strict report-proven path does not
+   resolve.
+
+Regression coverage uses the exact process-root/direct-child hierarchy from
+the report. No captured HWND or process ID is used in production selectors.
+
 ## 12. Error Code Reference
 
 | Error code | Meaning | Immediate action |
@@ -714,14 +789,14 @@ As of July 25, 2026:
 - The exact SmartAdvisor main window is detected.
 - The application and extractor are both genuine x86 executables.
 - The workflow selector registry and ordered actions are implemented.
-- The expected UIA parent of `cboClient` is known.
-- The explicit `Open Bill` → `Frame1` handshake still fails in the user's
-  Citrix environment.
-- A separate object extractor is published and ready.
-- The returned object report was analyzed; it found the main window and 47
-  process windows but did not expose `Open Bill`, `Frame1`, or `cboClient`.
-- Attachment now searches visible SmartAdvisor process top-level windows before
-  falling back to the main-window descendant chain.
+- The second object report proved the clean UIA chain
+  `frmBillOpen` → `Frame1` → `cboClient`.
+- Open Bill is a separate native top-level SmartAdvisor process root.
+- UIA direct-child traversal completed without errors or truncation.
+- Version 0.2.4 implements the exact process-root/direct-child hierarchy and
+  verifies `cboClient` before attachment succeeds.
+- The next action is a user validation run with the 0.2.4 x86 executable and
+  Open Bill visible.
 - The next user validation is to run the updated automation with `Open Bill`
   visible. If the landmark still fails, capture a new report with `Frame1` and
   `cboClient` visibly present to prove their backend/root/parent path.

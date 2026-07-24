@@ -91,6 +91,10 @@ def test_attach_resolves_landmark_only_inside_open_bill_frame(
         "smartadvisor_automation.driver.find_open_bill_frame",
         lambda _backend, _window: frame,
     )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_direct_uia_control",
+        lambda _backend, _parent, _automation_id: landmark,
+    )
     driver = SmartAdvisorDriver()
 
     assert driver.attach(CONTROLS_BY_STEP["1"]) == "uia"

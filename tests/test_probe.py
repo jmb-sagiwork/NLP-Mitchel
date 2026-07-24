@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from smartadvisor_automation.probe import (
     _native_smartadvisor_handles,
     _preferred_native_handle,
+    find_direct_uia_control,
     find_open_bill_frame,
     is_open_bill_frame_identity,
     is_smartadvisor_window_identity,
@@ -173,6 +174,68 @@ def test_find_open_bill_frame_searches_process_top_level_windows(
     )
 
     assert find_open_bill_frame("uia", main_window) is frame
+
+
+def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
+    monkeypatch,
+) -> None:
+    winforms_class = "WindowsForms10.Window.8.app.0.dynamic_ad1"
+    client_info = SimpleNamespace(
+        automation_id="cboClient",
+        name="",
+        control_type="ComboBox",
+        class_name=winforms_class,
+        handle=400,
+        children=lambda: [],
+    )
+    frame_info = SimpleNamespace(
+        automation_id="Frame1",
+        name="Enter Bill To Edit",
+        control_type="Group",
+        class_name=winforms_class,
+        handle=300,
+        children=lambda: [client_info],
+    )
+    open_bill_info = SimpleNamespace(
+        automation_id="frmBillOpen",
+        name="Open Bill",
+        control_type="Window",
+        class_name=winforms_class,
+        handle=200,
+        process_id=1234,
+        children=lambda: [frame_info],
+    )
+    main_window = SimpleNamespace(
+        element_info=SimpleNamespace(handle=100, process_id=1234)
+    )
+    open_bill = SimpleNamespace(element_info=open_bill_info)
+    frame = SimpleNamespace(element_info=frame_info)
+    client = SimpleNamespace(element_info=client_info)
+
+    class FakeDesktop:
+        def windows(self, **kwargs):
+            assert kwargs == {
+                "process": 1234,
+                "visible_only": True,
+                "enabled_only": False,
+            }
+            return [main_window, open_bill]
+
+        def window(self, **criteria):
+            assert criteria["handle"] in {300, 400}
+            return frame if criteria["handle"] == 300 else client
+
+    fake_pywinauto = SimpleNamespace(
+        Desktop=lambda backend: FakeDesktop()
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        fake_pywinauto,
+    )
+
+    assert find_open_bill_frame("uia", main_window) is frame
+    assert find_direct_uia_control("uia", frame, "cboClient") is client
 
 
 def test_native_enumeration_filters_by_title_class_and_visibility(

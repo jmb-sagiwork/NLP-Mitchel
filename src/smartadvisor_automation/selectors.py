@@ -4,8 +4,10 @@ WORKFLOW_NAME = "No Bill on File"
 SMARTADVISOR_WINDOW_TITLE = "SmartAdvisor Main System"
 SMARTADVISOR_WINDOW_CLASS_PREFIX = "WindowsForms10.Window."
 OPEN_BILL_WINDOW_TITLE = "Open Bill"
+OPEN_BILL_WINDOW_AUTOMATION_ID = "frmBillOpen"
 OPEN_BILL_FRAME_AUTOMATION_ID = "Frame1"
 OPEN_BILL_FRAME_NAME = "Enter Bill To Edit"
+OPEN_BILL_CLIENT_AUTOMATION_ID = "cboClient"
 
 NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ControlSpec(

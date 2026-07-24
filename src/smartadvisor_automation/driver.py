@@ -8,6 +8,7 @@ from smartadvisor_automation.errors import AutomationError
 from smartadvisor_automation.models import ControlSpec
 from smartadvisor_automation.probe import (
     SUPPORTED_BACKENDS,
+    find_direct_uia_control,
     find_open_bill_frame,
     find_smartadvisor_window,
     matching_elements,
@@ -56,6 +57,14 @@ class SmartAdvisorDriver:
             if landmark_scope is None:
                 continue
             saw_open_bill_frame = True
+
+            direct_landmark = find_direct_uia_control(
+                backend,
+                landmark_scope,
+                landmark.automation_id,
+            )
+            if direct_landmark is not None:
+                landmark_scope = direct_landmark
 
             self.backend = backend
             self.process_id = int(process_id)
