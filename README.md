@@ -25,6 +25,14 @@ and Amount, closes the result window, and displays the result in Tkinter.
 The application never stores Claim ID, DOS, Patient Account, or Amount on
 disk. It does not handle SmartAdvisor authentication.
 
+SmartAdvisor detection uses the dynamic native window handle for the exact
+32-bit WinForms identity:
+
+- title: `SmartAdvisor Main System`;
+- class prefix: `WindowsForms10.Window.`.
+
+The HWND and process ID are discovered at runtime and are never hard-coded.
+
 ## Run from source
 
 ```powershell
@@ -54,8 +62,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.2.0.zip
-release\SmartAdvisorAutomation-0.2.0.exe
+dist\SmartAdvisorAutomation-0.2.1.zip
+release\SmartAdvisorAutomation-0.2.1.exe
 ```
 
 The ZIP contains the supported one-folder package. The standalone EXE is
@@ -76,4 +84,3 @@ python -m pytest
 - A selector must match exactly one visible control before any action occurs.
 - Cancellation is checked between steps.
 - No Save, Submit, Update, or Delete control is used by this workflow.
-

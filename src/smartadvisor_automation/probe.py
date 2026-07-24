@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
 from smartadvisor_automation.models import ControlSpec, ProbeResult
 from smartadvisor_automation.selectors import (
     NO_BILL_ON_FILE_CONTROLS,
-    SMARTADVISOR_TITLE_PATTERN,
+    SMARTADVISOR_WINDOW_CLASS_PREFIX,
+    SMARTADVISOR_WINDOW_TITLE,
     WORKFLOW_NAME,
 )
 
@@ -101,22 +101,101 @@ def _probe_control(
     )
 
 
-def find_smartadvisor_window(
-    backend: str, title_pattern: str = SMARTADVISOR_TITLE_PATTERN
-) -> Any | None:
-    """Find a SmartAdvisor top-level window without returning its title."""
+def is_smartadvisor_window_identity(title: str, class_name: str) -> bool:
+    """Match the exact SmartAdvisor WinForms top-level window identity."""
+
+    return (
+        title.strip().casefold() == SMARTADVISOR_WINDOW_TITLE.casefold()
+        and class_name.startswith(SMARTADVISOR_WINDOW_CLASS_PREFIX)
+    )
+
+
+def _native_smartadvisor_handles() -> list[int]:
+    """Enumerate live SmartAdvisor HWNDs without relying on UIA text."""
+
+    import win32gui
+
+    handles: list[int] = []
+
+    def collect(hwnd: int, _context: object) -> bool:
+        try:
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            title = win32gui.GetWindowText(hwnd)
+            class_name = win32gui.GetClassName(hwnd)
+        except Exception:
+            return True
+
+        if is_smartadvisor_window_identity(title, class_name):
+            handles.append(hwnd)
+        return True
+
+    win32gui.EnumWindows(collect, None)
+    return handles
+
+
+def _window_area(hwnd: int) -> int:
+    import win32gui
+
+    try:
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    except Exception:
+        return 0
+    return max(0, right - left) * max(0, bottom - top)
+
+
+def _preferred_native_handle(handles: list[int]) -> int | None:
+    """Prefer the foreground match, then the largest visible window."""
+
+    if not handles:
+        return None
+
+    import win32gui
+
+    try:
+        foreground = win32gui.GetForegroundWindow()
+    except Exception:
+        foreground = None
+    if foreground in handles:
+        return foreground
+
+    return max(handles, key=_window_area)
+
+
+def _element_identity(window: Any) -> tuple[str, str]:
+    """Read only static top-level identity properties."""
+
+    info = window.element_info
+    title = ""
+    class_name = str(getattr(info, "class_name", "") or "")
+
+    try:
+        title = str(window.window_text() or "")
+    except Exception:
+        title = str(getattr(info, "name", "") or "")
+
+    return title, class_name
+
+
+def find_smartadvisor_window(backend: str) -> Any | None:
+    """Find SmartAdvisor by exact native HWND, with a strict UIA fallback."""
 
     from pywinauto import Desktop
 
-    title_regex = re.compile(title_pattern, re.IGNORECASE)
     desktop = Desktop(backend=backend)
 
-    for window in desktop.windows():
+    native_handle = _preferred_native_handle(
+        _native_smartadvisor_handles()
+    )
+    if native_handle is not None:
         try:
-            title = window.window_text()
+            return desktop.window(handle=native_handle)
         except Exception:
-            continue
-        if title_regex.fullmatch(title):
+            pass
+
+    for window in desktop.windows():
+        title, class_name = _element_identity(window)
+        if is_smartadvisor_window_identity(title, class_name):
             return window
 
     return None
@@ -178,7 +257,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.2.0",
+        "utility_version": "0.2.1",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {
@@ -189,4 +268,3 @@ def scan_controls(
         },
         "backend_results": [probe_backend(backend) for backend in backends],
     }
-

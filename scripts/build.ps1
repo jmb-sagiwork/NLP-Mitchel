@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $packageName = "SmartAdvisorAutomation"
-$version = "0.2.0"
+$version = "0.2.1"
 Push-Location $repositoryRoot
 
 try {

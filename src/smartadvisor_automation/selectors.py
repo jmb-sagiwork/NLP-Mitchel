@@ -1,7 +1,8 @@
 from smartadvisor_automation.models import ControlSpec
 
 WORKFLOW_NAME = "No Bill on File"
-SMARTADVISOR_TITLE_PATTERN = r".*SmartAdvisor.*"
+SMARTADVISOR_WINDOW_TITLE = "SmartAdvisor Main System"
+SMARTADVISOR_WINDOW_CLASS_PREFIX = "WindowsForms10.Window."
 
 NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ControlSpec(
@@ -76,4 +77,3 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
 CONTROLS_BY_STEP = {
     control.step: control for control in NO_BILL_ON_FILE_CONTROLS
 }
-

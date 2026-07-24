@@ -11,7 +11,6 @@ from smartadvisor_automation.probe import (
     find_smartadvisor_window,
     matching_elements,
 )
-from smartadvisor_automation.selectors import SMARTADVISOR_TITLE_PATTERN
 
 
 class SmartAdvisorDriver:
@@ -31,15 +30,16 @@ class SmartAdvisorDriver:
     def attach(self, landmark: ControlSpec) -> str:
         """Select the first backend that exposes the starting landmark."""
 
+        saw_smartadvisor_window = False
+
         for backend in SUPPORTED_BACKENDS:
             try:
-                window = find_smartadvisor_window(
-                    backend, SMARTADVISOR_TITLE_PATTERN
-                )
+                window = find_smartadvisor_window(backend)
             except Exception:
                 continue
             if window is None:
                 continue
+            saw_smartadvisor_window = True
 
             process_id = getattr(window.element_info, "process_id", None)
             if process_id is None:
@@ -55,7 +55,12 @@ class SmartAdvisorDriver:
                 continue
             return backend
 
-        raise AutomationError("smartadvisor_landmark_not_found", step=landmark.step)
+        code = (
+            "smartadvisor_controls_not_accessible"
+            if saw_smartadvisor_window
+            else "smartadvisor_window_not_found"
+        )
+        raise AutomationError(code, step=landmark.step)
 
     def _windows_for_process(self) -> list[Any]:
         if self.backend is None or self.process_id is None:
@@ -190,4 +195,3 @@ class SmartAdvisorDriver:
                 return normalized
 
         raise AutomationError("empty_extracted_value", step=spec.step)
-
