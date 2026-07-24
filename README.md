@@ -47,6 +47,16 @@ PyInstaller uses one-folder mode. Transfer
 extract it, and run `SmartAdvisorDiscovery.exe`. Do not copy the EXE by itself;
 the adjacent runtime files are required.
 
+The build also creates a self-contained executable at:
+
+```text
+release\SmartAdvisorDiscovery-0.1.0.exe
+```
+
+This standalone EXE is committed to the repository for direct download. It can
+start more slowly than the one-folder package because it extracts its runtime
+to a temporary directory on launch.
+
 ## Test
 
 ```powershell
