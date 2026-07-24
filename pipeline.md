@@ -1,5 +1,9 @@
 # SmartAdvisor Citrix Automation Pipeline
 
+> **Document status:** Sections 1–8 preserve the original design plan.
+> Section 9 onward is the authoritative implementation and troubleshooting
+> record as of July 25, 2026. Future work should start with Sections 9–17.
+
 ## 1. Objective
 
 Build an attended, read-only Windows automation assistant for SmartAdvisor. The
@@ -12,7 +16,8 @@ The first release must not create, update, submit, or delete SmartAdvisor data.
 
 ## 2. Confirmed Constraints
 
-- **Runtime:** Python inside the Citrix session.
+- **Runtime:** The executable runs inside the Citrix session and bundles a
+  32-bit Python runtime; Python does not need to be installed in Citrix.
 - **Delivery:** Packaged Windows executable; end users do not install Python or
   dependencies.
 - **UI:** Tkinter.
@@ -156,8 +161,9 @@ fixed field list are defined.
 ### Stage 5 — Packaging
 
 1. Pin Python and dependency versions in the build environment.
-2. Package with PyInstaller in **one-folder** mode for faster startup and easier
-   inspection than a one-file executable.
+2. Package the user-facing release with PyInstaller in **one-file** mode. This
+   is an explicit project requirement because Citrix may not have Python and
+   the user does not want to transfer an `_internal` directory.
 3. Include only approved selector assets and OCR resources.
 4. Store runtime configuration beside the executable in a read-only default
    configuration file.
@@ -263,3 +269,440 @@ These facts must be supplied or captured during Stages 1 and 2:
 - Citrix display scaling and resolution policy.
 - Required packaging, signing, deployment, and log-retention approvals.
 
+## 9. Current Implementation Snapshot
+
+This section supersedes conflicting assumptions in the original plan.
+
+- Repository:
+  `https://github.com/jmb-sagiwork/Sagi-SmartAdvisor`
+- Branch: `main`
+- Platform: Windows desktop application running inside Citrix.
+- Target application: 32-bit SmartAdvisor WinForms.
+- Automation UI: Tkinter.
+- Automation library: `pywinauto==0.6.9`.
+- Packager: PyInstaller one-file executable.
+- Required build architecture: x86 (`PE machine 0x014C`).
+- Current workflow executable:
+  `release/SmartAdvisorAutomation-0.2.3-x86.exe`.
+- Current diagnostic executable:
+  `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
+- Current automated test count: 35 passing.
+- No Python installation is required in Citrix.
+- The executable must run inside the same Citrix Windows session as
+  SmartAdvisor.
+- SmartAdvisor and the automation should run at the same elevation level. If
+  SmartAdvisor is elevated, the automation must also be elevated.
+
+The current implementation is an attended **No Bill on File** workflow. It
+does not use `pyautogui` or coordinate clicking as its primary mechanism.
+Visual automation remains only a possible future fallback.
+
+## 10. Implemented Workflow and Selectors
+
+The supplied manual workflow was translated into the following stable selector
+sequence. Live claim IDs, dates, patient accounts, and amounts are deliberately
+not repeated in this document.
+
+| Step | Automation ID | Purpose | Action |
+|---|---|---|---|
+| 1 | `cboClient` | Open bill/client selection | Click |
+| 2 | `_cmdSearch_1` | Additional search options (`...`) | Click |
+| 3 | `263892` | Search/input box | Click, select all, clear |
+| 4 | `btnAdvacedSearch` | Advanced Search | Click |
+| 5 | `67390` | Claim ID | Input |
+| 6 | `67512` | DOS From | Input |
+| 7 | `cmdOK` | Confirm search | Click |
+| 8.1 | `263910` | Verify/select claim details | Click |
+| 8.2 | `198916` | Patient Account | Read |
+| 8.3 | `329468` | Amount | Read, then click |
+| 9 | `1901400` | Close result/message window | Click |
+
+Selector rules:
+
+1. Match an exact `AutomationId` first.
+2. If the supplied selector is numeric, permit an exact numeric Win32
+   `control_id` match.
+3. Require exactly one visible and enabled match before acting.
+4. Never hard-code runtime HWNDs or process IDs.
+5. Never log the values entered at steps 5–6 or extracted at steps 8.2–8.3.
+
+## 11. Troubleshooting Timeline
+
+### 11.1 Initial visibility limitation
+
+Codex cannot directly see or control the user's local or Citrix desktop from
+the repository environment. Any discovery tool must be run by the user inside
+the same Citrix session as SmartAdvisor. The user must return redacted
+inspection output or a generated diagnostic report.
+
+### 11.2 First executable behavior
+
+The first executable was intended to:
+
+1. provide a Tkinter form for Claim ID and DOS From;
+2. attach to an already authenticated SmartAdvisor session;
+3. run the supplied selector sequence;
+4. display the Patient Account, Amount, and fixed outcome message;
+5. avoid requiring Python in Citrix.
+
+The initial ZIP also contained an `_internal` directory. That was the normal
+PyInstaller one-folder runtime, not source code and not an indication that
+Python had to be installed. The user explicitly preferred a single EXE, so the
+release pipeline was changed to publish a PyInstaller one-file executable.
+
+### 11.3 Main SmartAdvisor window was not detected
+
+The initial application detector did not reliably find SmartAdvisor. Inspect
+output supplied by the user established the top-level identity:
+
+- visible title: `SmartAdvisor Main System`;
+- class prefix: `WindowsForms10.Window.`;
+- application type: 32-bit WinForms;
+- observed UIA process ID: `29524`;
+- observed provider proxy process ID: `38648`;
+- observed sample HWND: `0x000409E0`.
+
+The IDs and HWND above are evidence from one run only. They are dynamic and
+must never be used as selectors.
+
+The title bar itself appeared as a UIA TitleBar element with a parent
+`SmartAdvisor Main System` window. Citrix/UIA provider descriptions showed
+proxying between process IDs, which is one reason title-only UIA discovery was
+not sufficient.
+
+Fix implemented in commit `bc745c8`:
+
+- enumerate visible native top-level HWNDs;
+- match the exact title and WinForms class prefix;
+- choose the foreground match when available, otherwise the largest matching
+  window;
+- wrap the selected dynamic HWND using the requested `uia` or `win32`
+  backend;
+- retain strict UIA desktop enumeration only as a fallback.
+
+### 11.4 Main window found, but controls were inaccessible
+
+After main-window detection was fixed, the x64 executable found SmartAdvisor
+but returned:
+
+```text
+smartadvisor_controls_not_accessible
+```
+
+The key diagnosis was an architecture mismatch:
+
+- SmartAdvisor: 32-bit WinForms;
+- packaged automation at that time: 64-bit Python/PyInstaller.
+
+Matching the target architecture matters for legacy WinForms and Win32
+control inspection. The build pipeline was therefore changed to use 32-bit
+Python 3.11 in GitHub Actions and to verify the PE machine type before
+publishing.
+
+Build work:
+
+- `285c19b` — add x86 executable pipeline;
+- GitHub Actions run `30119731246` — successful x86 build;
+- `f2df291` — publish `SmartAdvisorAutomation-0.2.2-x86.exe`.
+
+The published 0.2.2 executable was verified as:
+
+- PE machine: `0x014C`;
+- size: `11,899,606` bytes;
+- SHA-256:
+  `AAC5BE74A76A0DBD10758D004BCC3AF634B5562584B7D279471A937E3E88FAF5`;
+- startup smoke test: remained running for eight seconds and left no test
+  process behind;
+- tests at that point: 25 passing.
+
+This corrected the architecture mismatch but did not fully solve descendant
+access in Citrix.
+
+### 11.5 Parent of `cboClient` identified
+
+The user navigated upward from `cboClient` in Inspect.exe and supplied the
+following stable parent:
+
+- Control type: UIA Group;
+- Name: `Enter Bill To Edit`;
+- Automation ID: `Frame1`;
+- Framework: `WinForm`;
+- class prefix: `WindowsForms10.Window.`;
+- observed native HWND: `0x00140866`;
+- observed process ID: `29524`.
+
+The observed child list was:
+
+- `...` button;
+- `...` button;
+- `cboClient` combo box;
+- `Read Only` check box;
+- unnamed edit;
+- `C&lient:` text;
+- `Bill &Number:` text.
+
+The observed UIA ancestor chain was:
+
+```text
+Frame1 / Enter Bill To Edit
+└── Open Bill
+    └── SmartAdvisor Main System
+        └── Desktop 1
+```
+
+The sample HWND and process ID are diagnostic evidence only and are not
+hard-coded.
+
+### 11.6 Parent-scoped handshake implemented
+
+Version 0.2.3 made the expected attach handshake explicit:
+
+```text
+SmartAdvisor Main System
+└── Open Bill
+    └── Frame1 / Enter Bill To Edit
+        └── cboClient
+```
+
+Implementation details:
+
+- locate `Open Bill` by exact native name and WinForms class beneath the main
+  HWND;
+- locate `Enter Bill To Edit` beneath `Open Bill`;
+- validate the UIA group identity with exact `AutomationId=Frame1`;
+- fall back to a narrow UIA traversal when native HWND nesting differs;
+- resolve step 1 (`cboClient`) only inside the validated `Frame1` scope;
+- resolve steps 2–9 across all visible SmartAdvisor process windows because
+  later dialogs change;
+- distinguish a missing parent with:
+  `smartadvisor_open_bill_frame_not_accessible`.
+
+Build work:
+
+- `fa46243` — implement parent-scoped handshake;
+- GitHub Actions run `30121671237` — successful x86 build;
+- `387dd66` — publish `SmartAdvisorAutomation-0.2.3-x86.exe`.
+
+The published 0.2.3 executable was verified as:
+
+- PE machine: `0x014C`;
+- size: `11,901,819` bytes;
+- SHA-256:
+  `BB30BE538E036A0F5A2A2FFFCA90DB98AE92EF4D3CE213F572A271FA04D85F25`;
+- startup smoke test: remained running for eight seconds and left no test
+  process behind;
+- tests at that point: 29 passing.
+
+### 11.7 Parent handshake still failed in Citrix
+
+The user ran 0.2.3 with SmartAdvisor and Open Bill visible and received:
+
+```text
+smartadvisor_open_bill_frame_not_accessible
+```
+
+This error has a narrower meaning than the previous error:
+
+1. `SmartAdvisor Main System` was found.
+2. Neither backend completed the required `Open Bill` → `Frame1` handshake.
+3. The workflow stopped before clicking `cboClient`.
+
+The remaining hypotheses are:
+
+- `Open Bill` is an owned top-level window rather than a native child of the
+  main HWND;
+- UIA displays `Open Bill` beneath the main window even though the native HWND
+  parent/owner relationship differs;
+- a Citrix/MSAA/UIA proxy branch throws while descendants are enumerated;
+- the UIA element's reported process differs from the native provider process;
+- the automation and SmartAdvisor are running at different elevation levels;
+- the automation is running outside the exact Citrix desktop/session containing
+  SmartAdvisor;
+- the `win32` and `uia` backends expose different partial trees.
+
+Do not guess another selector or add coordinates until an object report has
+been captured.
+
+### 11.8 Read-only object extractor created
+
+Because the attach logic itself could not reach `Frame1`, a separate extractor
+was created that does not depend on any workflow landmark.
+
+Source work:
+
+- `dd8c307` — add SmartAdvisor object extractor;
+- GitHub Actions run `30123076540` — build and verify both x86 executables;
+- `e8802f7` — publish
+  `SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
+
+The extractor:
+
+- locates the SmartAdvisor main HWND using the already verified exact
+  title/class identity;
+- identifies every top-level HWND owned by the SmartAdvisor process, so owned
+  dialogs are not missed;
+- extracts each native HWND tree;
+- extracts separate UIA and Win32 trees for each process window;
+- walks children node-by-node so one provider failure does not discard the
+  rest of the tree;
+- records `node_id`, `parent_id`, depth, automation ID, control ID, control
+  type, class, framework, HWND, process ID, runtime ID, bounds, visibility,
+  enabled state, truncation, and per-node error codes;
+- never clicks, types, focuses, submits, or modifies SmartAdvisor;
+- retains only the structural names `SmartAdvisor Main System`, `Open Bill`,
+  and `Enter Bill To Edit`;
+- marks every other UI name or native text as redacted;
+- excludes field values and exception messages.
+
+The published extractor was verified as:
+
+- PE machine: `0x014C`;
+- size: `11,936,008` bytes;
+- SHA-256:
+  `CBF28248C19069FE82DA690686D653B8CEC5E9FB66860170E70EFB3F430B787E`;
+- startup smoke test: remained running for eight seconds and left no test
+  process behind;
+- current tests: 35 passing.
+
+## 12. Error Code Reference
+
+| Error code | Meaning | Immediate action |
+|---|---|---|
+| `smartadvisor_window_not_found` | Exact main title/class was not found | Confirm same Citrix session, visibility, and elevation |
+| `smartadvisor_open_bill_frame_not_accessible` | Main window found, but `Open Bill`/`Frame1` handshake failed | Run the object extractor with Open Bill visible |
+| `smartadvisor_controls_not_accessible` | Parent scope was found, but `cboClient` did not resolve uniquely/actionably | Inspect the extractor's `Frame1` children |
+| `selector_not_found` | A later workflow selector was not found before timeout | Inspect the active dialog/root for that step |
+| `selector_ambiguous` | More than one visible actionable control matched | Add a stable parent scope |
+| `window_enumeration_failed` | Process windows could not be listed | Check backend, session, elevation, and provider errors |
+| `not_attached` | An action was requested before a successful attach | Treat as an internal state failure |
+
+All errors shown in the UI must remain safe: an error code and step number may
+be displayed, but claim, patient, account, amount, and control values must not
+be included.
+
+## 13. Object Extractor Runbook
+
+Download:
+
+```text
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
+```
+
+Before extraction:
+
+1. Enter the Citrix desktop containing SmartAdvisor.
+2. Sign in to SmartAdvisor manually.
+3. Open the **Open Bill** window.
+4. Leave **Enter Bill To Edit** and `cboClient` visible.
+5. Run the extractor in the same session and at the same elevation level.
+
+Extraction:
+
+1. Select **Extract objects and save JSON**.
+2. Save the default `SmartAdvisor-object-report.json`.
+3. Attach that JSON to the development conversation.
+4. Do not send screenshots or live field values unless separately approved.
+
+The JSON is the next required diagnostic input. No further automation
+selector changes should be made before reviewing it.
+
+## 14. How to Analyze the Object Report
+
+When a future session receives `SmartAdvisor-object-report.json`, analyze it in
+this order:
+
+1. Check `discovery.status`.
+   - It must be `found`.
+   - Record `selected_handle`, `process_id`, and `process_window_count`.
+2. Review every entry in `native_trees`.
+   - Find the allowlisted name `Open Bill`.
+   - Determine whether its root is the main HWND or a separate process window.
+   - Find `Enter Bill To Edit` and inspect its native `parent_id`.
+3. Review `backend_trees` grouped by `backend` and `root_handle`.
+   - Search exact `automation_id=Frame1`.
+   - Search exact `automation_id=cboClient`.
+   - Compare which root and backend exposes each one.
+4. Review each tree's `status`, `truncated`, and `errors`.
+   - A `partial` tree is useful; follow the error's `node_id`.
+   - Determine the nearest successfully extracted parent.
+5. Reconstruct the real path using `node_id` and `parent_id`.
+6. Choose the smallest stable scope that contains both `Frame1` and
+   `cboClient`.
+7. Update the attach logic only after the actual backend/root relationship is
+   proven.
+
+Likely implementation directions after the report:
+
+- attach to the separate `Open Bill` process-window HWND directly;
+- search all SmartAdvisor process top-level windows before descendant search;
+- resolve `Frame1` through UIA while retaining native HWND discovery;
+- use a hybrid native-root/UIA-child adapter;
+- if UIA consistently fails at a specific node, use the Win32 tree for that
+  boundary and UIA below the next usable HWND.
+
+Absolute coordinates remain a last resort.
+
+## 15. Release and Commit Ledger
+
+| Commit/run | Purpose |
+|---|---|
+| `8964102` | Add original automation pipeline |
+| `d7da52f` | Add initial control discovery tool |
+| `154c40e` | Add standalone discovery executable |
+| `a782c82` | Implement No Bill on File workflow |
+| `bc745c8` | Detect exact SmartAdvisor WinForms main window |
+| `285c19b` | Add x86 executable pipeline |
+| Actions `30119731246` | Build and PE-verify 0.2.2 x86 |
+| `f2df291` | Publish 0.2.2 x86 executable |
+| `fa46243` | Add `Open Bill` → `Frame1` handshake |
+| Actions `30121671237` | Build and PE-verify 0.2.3 x86 |
+| `387dd66` | Publish 0.2.3 x86 executable |
+| `dd8c307` | Add privacy-safe object extractor |
+| Actions `30123076540` | Build/verify automation and extractor x86 EXEs |
+| `e8802f7` | Publish object extractor 0.1.0 x86 |
+
+Current direct downloads:
+
+```text
+Automation:
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.2.3-x86.exe
+
+Object extractor:
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
+```
+
+## 16. Relevant Source Map
+
+| File | Responsibility |
+|---|---|
+| `src/smartadvisor_automation/selectors.py` | Window identity, parent identity, and workflow selector registry |
+| `src/smartadvisor_automation/probe.py` | Native main-window discovery, selector probing, and parent lookup |
+| `src/smartadvisor_automation/driver.py` | Attach, scoped resolution, clicking, input, and extraction |
+| `src/smartadvisor_automation/workflow.py` | Ordered No Bill on File workflow |
+| `src/smartadvisor_automation/app.py` | Main Tkinter automation UI |
+| `src/smartadvisor_automation/object_extractor.py` | Privacy-safe native/UIA/Win32 object extraction |
+| `src/smartadvisor_automation/object_extractor_app.py` | Standalone extractor Tkinter UI and JSON save flow |
+| `scripts/build.ps1` | PyInstaller build for both one-file EXEs |
+| `.github/workflows/build-x86.yml` | 32-bit Python test/build/PE verification/artifact upload |
+| `tests/test_driver.py` | Attach and scoped-resolution regression tests |
+| `tests/test_probe.py` | Main-window and parent-identity regression tests |
+| `tests/test_object_extractor.py` | Tree traversal, truncation, parent, and redaction tests |
+| `tests/test_report_privacy.py` | Report schema privacy gates |
+
+## 17. Current Handoff State
+
+As of July 25, 2026:
+
+- The exact SmartAdvisor main window is detected.
+- The application and extractor are both genuine x86 executables.
+- The workflow selector registry and ordered actions are implemented.
+- The expected UIA parent of `cboClient` is known.
+- The explicit `Open Bill` → `Frame1` handshake still fails in the user's
+  Citrix environment.
+- A separate object extractor is published and ready.
+- The next action belongs to the user: run the extractor with Open Bill visible
+  and return the generated JSON.
+- The next development action is to analyze that JSON, prove the real
+  backend/root/parent path, and then update the attach logic.
+- Do not reintroduce x64 builds, hard-coded HWNDs/process IDs, raw field
+  logging, or coordinate-first automation.
