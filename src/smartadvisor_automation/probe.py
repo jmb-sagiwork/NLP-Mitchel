@@ -6,6 +6,9 @@ from typing import Any, Iterable
 from smartadvisor_automation.models import ControlSpec, ProbeResult
 from smartadvisor_automation.selectors import (
     NO_BILL_ON_FILE_CONTROLS,
+    OPEN_BILL_FRAME_AUTOMATION_ID,
+    OPEN_BILL_FRAME_NAME,
+    OPEN_BILL_WINDOW_TITLE,
     SMARTADVISOR_WINDOW_CLASS_PREFIX,
     SMARTADVISOR_WINDOW_TITLE,
     WORKFLOW_NAME,
@@ -162,6 +165,160 @@ def _preferred_native_handle(handles: list[int]) -> int | None:
     return max(handles, key=_window_area)
 
 
+def _element_handle(element: Any) -> int | None:
+    """Read a wrapper's native HWND without depending on one backend."""
+
+    info = getattr(element, "element_info", None)
+    handle = getattr(info, "handle", None)
+    if handle is None:
+        handle = getattr(element, "handle", None)
+
+    try:
+        native_handle = int(handle)
+    except (TypeError, ValueError):
+        return None
+    return native_handle if native_handle else None
+
+
+def _native_named_descendants(
+    parent_handle: int,
+    expected_name: str,
+) -> list[int]:
+    """Find visible WinForms descendants by their exact native text."""
+
+    import win32gui
+
+    handles: list[int] = []
+
+    def collect(hwnd: int, _context: object) -> bool:
+        try:
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            name = win32gui.GetWindowText(hwnd)
+            class_name = win32gui.GetClassName(hwnd)
+        except Exception:
+            return True
+
+        if (
+            name.strip().casefold() == expected_name.casefold()
+            and class_name.startswith(SMARTADVISOR_WINDOW_CLASS_PREFIX)
+        ):
+            handles.append(hwnd)
+        return True
+
+    win32gui.EnumChildWindows(parent_handle, collect, None)
+    return handles
+
+
+def is_open_bill_frame_identity(
+    name: str,
+    automation_id: str,
+    class_name: str,
+) -> bool:
+    """Match the stable UIA identity supplied for the Open Bill group."""
+
+    return (
+        name.strip().casefold() == OPEN_BILL_FRAME_NAME.casefold()
+        and automation_id == OPEN_BILL_FRAME_AUTOMATION_ID
+        and class_name.startswith(SMARTADVISOR_WINDOW_CLASS_PREFIX)
+    )
+
+
+def _element_name(element: Any) -> str:
+    info = getattr(element, "element_info", None)
+    try:
+        name = str(element.window_text() or "")
+    except Exception:
+        name = ""
+    return name or str(getattr(info, "name", "") or "")
+
+
+def _find_frame_in_open_bill(open_bill: Any) -> Any | None:
+    """Use the narrow Open Bill subtree if native frame lookup is unavailable."""
+
+    try:
+        descendants = list(open_bill.descendants())
+    except Exception:
+        return None
+
+    for element in descendants:
+        info = element.element_info
+        if is_open_bill_frame_identity(
+            _element_name(element),
+            str(getattr(info, "automation_id", "") or ""),
+            str(getattr(info, "class_name", "") or ""),
+        ):
+            return element
+    return None
+
+
+def _find_open_bill_in_main(main_window: Any) -> Any | None:
+    """Fall back to the supplied UIA ancestry when HWND nesting differs."""
+
+    try:
+        descendants = list(main_window.descendants(control_type="Window"))
+    except Exception:
+        try:
+            descendants = list(main_window.descendants())
+        except Exception:
+            return None
+
+    for element in descendants:
+        info = element.element_info
+        if (
+            _element_name(element).strip().casefold()
+            == OPEN_BILL_WINDOW_TITLE.casefold()
+            and str(getattr(info, "class_name", "") or "").startswith(
+                SMARTADVISOR_WINDOW_CLASS_PREFIX
+            )
+        ):
+            return element
+    return None
+
+
+def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
+    """Handshake through Main System -> Open Bill -> Frame1."""
+
+    from pywinauto import Desktop
+
+    main_handle = _element_handle(main_window)
+    desktop = Desktop(backend=backend)
+    open_bill = None
+
+    if main_handle is not None:
+        open_bill_handles = _native_named_descendants(
+            main_handle,
+            OPEN_BILL_WINDOW_TITLE,
+        )
+        open_bill_handle = _preferred_native_handle(open_bill_handles)
+        if open_bill_handle is not None:
+            open_bill = desktop.window(handle=open_bill_handle)
+
+    if open_bill is None:
+        open_bill = _find_open_bill_in_main(main_window)
+    if open_bill is None:
+        return None
+
+    open_bill_handle = _element_handle(open_bill)
+    if open_bill_handle is not None:
+        frame_handles = _native_named_descendants(
+            open_bill_handle,
+            OPEN_BILL_FRAME_NAME,
+        )
+        frame_handle = _preferred_native_handle(frame_handles)
+        if frame_handle is not None:
+            frame = desktop.window(handle=frame_handle)
+            info = frame.element_info
+            if is_open_bill_frame_identity(
+                _element_name(frame),
+                str(getattr(info, "automation_id", "") or ""),
+                str(getattr(info, "class_name", "") or ""),
+            ):
+                return frame
+
+    return _find_frame_in_open_bill(open_bill)
+
+
 def _element_identity(window: Any) -> tuple[str, str]:
     """Read only static top-level identity properties."""
 
@@ -257,7 +414,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.2.2",
+        "utility_version": "0.2.3",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

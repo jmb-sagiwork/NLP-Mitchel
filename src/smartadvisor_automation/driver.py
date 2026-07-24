@@ -8,6 +8,7 @@ from smartadvisor_automation.errors import AutomationError
 from smartadvisor_automation.models import ControlSpec
 from smartadvisor_automation.probe import (
     SUPPORTED_BACKENDS,
+    find_open_bill_frame,
     find_smartadvisor_window,
     matching_elements,
 )
@@ -26,11 +27,14 @@ class SmartAdvisorDriver:
         self.poll_interval = poll_interval
         self.backend: str | None = None
         self.process_id: int | None = None
+        self._landmark_scope: Any | None = None
+        self._landmark_automation_id: str | None = None
 
     def attach(self, landmark: ControlSpec) -> str:
-        """Select the first backend that exposes the starting landmark."""
+        """Handshake through Open Bill/Frame1 using the first viable backend."""
 
         saw_smartadvisor_window = False
+        saw_open_bill_frame = False
 
         for backend in SUPPORTED_BACKENDS:
             try:
@@ -45,21 +49,34 @@ class SmartAdvisorDriver:
             if process_id is None:
                 continue
 
+            try:
+                landmark_scope = find_open_bill_frame(backend, window)
+            except Exception:
+                continue
+            if landmark_scope is None:
+                continue
+            saw_open_bill_frame = True
+
             self.backend = backend
             self.process_id = int(process_id)
+            self._landmark_scope = landmark_scope
+            self._landmark_automation_id = landmark.automation_id
             try:
                 self.resolve(landmark, timeout=2.0)
             except AutomationError:
                 self.backend = None
                 self.process_id = None
+                self._landmark_scope = None
+                self._landmark_automation_id = None
                 continue
             return backend
 
-        code = (
-            "smartadvisor_controls_not_accessible"
-            if saw_smartadvisor_window
-            else "smartadvisor_window_not_found"
-        )
+        if not saw_smartadvisor_window:
+            code = "smartadvisor_window_not_found"
+        elif not saw_open_bill_frame:
+            code = "smartadvisor_open_bill_frame_not_accessible"
+        else:
+            code = "smartadvisor_controls_not_accessible"
         raise AutomationError(code, step=landmark.step)
 
     def _windows_for_process(self) -> list[Any]:
@@ -79,14 +96,25 @@ class SmartAdvisorDriver:
         except Exception as exc:
             raise AutomationError("window_enumeration_failed") from exc
 
-    def _all_elements(self) -> list[Any]:
+    @staticmethod
+    def _elements_in_scope(scope: Any) -> list[Any]:
+        elements = [scope]
+        try:
+            elements.extend(scope.descendants())
+        except Exception:
+            pass
+        return elements
+
+    def _all_elements(self, spec: ControlSpec) -> list[Any]:
+        if (
+            self._landmark_scope is not None
+            and spec.automation_id == self._landmark_automation_id
+        ):
+            return self._elements_in_scope(self._landmark_scope)
+
         elements: list[Any] = []
         for window in self._windows_for_process():
-            elements.append(window)
-            try:
-                elements.extend(window.descendants())
-            except Exception:
-                continue
+            elements.extend(self._elements_in_scope(window))
         return elements
 
     def resolve(
@@ -105,7 +133,7 @@ class SmartAdvisorDriver:
         while time.monotonic() < deadline:
             try:
                 matches = matching_elements(
-                    self._all_elements(), spec.automation_id
+                    self._all_elements(spec), spec.automation_id
                 )
             except AutomationError:
                 raise

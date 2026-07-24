@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from smartadvisor_automation.probe import (
     _native_smartadvisor_handles,
     _preferred_native_handle,
+    find_open_bill_frame,
+    is_open_bill_frame_identity,
     is_smartadvisor_window_identity,
     selector_match_strategy,
 )
@@ -49,6 +51,80 @@ def test_smartadvisor_identity_rejects_unrelated_title_and_class() -> None:
         "SmartAdvisor Main System",
         "Transparent Windows Client",
     )
+
+
+def test_open_bill_frame_identity_matches_supplied_parent() -> None:
+    assert is_open_bill_frame_identity(
+        "Enter Bill To Edit",
+        "Frame1",
+        "WindowsForms10.Window.8.app.0.dynamic_ad1",
+    )
+    assert not is_open_bill_frame_identity(
+        "Enter Bill To Edit",
+        "OtherFrame",
+        "WindowsForms10.Window.8.app.0.dynamic_ad1",
+    )
+
+
+def test_find_open_bill_frame_follows_native_parent_chain(
+    monkeypatch,
+) -> None:
+    winforms_class = "WindowsForms10.Window.8.app.0.dynamic_ad1"
+    windows = {
+        200: (True, "Open Bill", winforms_class),
+        300: (True, "Enter Bill To Edit", winforms_class),
+    }
+    children = {100: [200], 200: [300]}
+    fake_win32gui = SimpleNamespace(
+        EnumChildWindows=lambda parent, callback, context: [
+            callback(hwnd, context) for hwnd in children.get(parent, [])
+        ],
+        IsWindowVisible=lambda hwnd: windows[hwnd][0],
+        GetWindowText=lambda hwnd: windows[hwnd][1],
+        GetClassName=lambda hwnd: windows[hwnd][2],
+        GetForegroundWindow=lambda: 0,
+        GetWindowRect=lambda hwnd: (0, 0, hwnd, hwnd),
+    )
+
+    open_bill = SimpleNamespace(
+        element_info=SimpleNamespace(
+            handle=200,
+            automation_id="",
+            class_name=winforms_class,
+            name="Open Bill",
+        ),
+        window_text=lambda: "Open Bill",
+    )
+    frame = SimpleNamespace(
+        element_info=SimpleNamespace(
+            handle=300,
+            automation_id="Frame1",
+            class_name=winforms_class,
+            name="Enter Bill To Edit",
+        ),
+        window_text=lambda: "Enter Bill To Edit",
+    )
+    wrappers = {200: open_bill, 300: frame}
+    fake_pywinauto = SimpleNamespace(
+        Desktop=lambda backend: SimpleNamespace(
+            window=lambda *, handle: wrappers[handle]
+        )
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "win32gui",
+        fake_win32gui,
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        fake_pywinauto,
+    )
+    main_window = SimpleNamespace(
+        element_info=SimpleNamespace(handle=100)
+    )
+
+    assert find_open_bill_frame("uia", main_window) is frame
 
 
 def test_native_enumeration_filters_by_title_class_and_visibility(

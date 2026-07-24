@@ -32,6 +32,8 @@ SmartAdvisor detection uses the dynamic native window handle for the exact
 - class prefix: `WindowsForms10.Window.`.
 
 The HWND and process ID are discovered at runtime and are never hard-coded.
+Attachment then follows the stable parent hierarchy:
+`Open Bill` window → `Frame1` / `Enter Bill To Edit` group → `cboClient`.
 
 ## Run from source
 
@@ -44,7 +46,8 @@ Before running:
 
 1. Open Citrix.
 2. Sign in to SmartAdvisor manually.
-3. Leave SmartAdvisor on the screen where `cboClient` is available.
+3. Leave the **Open Bill** window on screen with the
+   **Enter Bill To Edit** group and `cboClient` available.
 4. Start the automation inside the same Citrix session.
 5. Enter Claim ID and DOS From.
 6. Select **Run workflow**.
@@ -62,8 +65,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.2.2-x86.zip
-release\SmartAdvisorAutomation-0.2.2-x86.exe
+dist\SmartAdvisorAutomation-0.2.3-x86.zip
+release\SmartAdvisorAutomation-0.2.3-x86.exe
 ```
 
 The ZIP contains the supported one-folder package. The standalone EXE is
