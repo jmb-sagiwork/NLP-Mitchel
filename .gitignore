@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+reports/
+*.spec
+*.log
+
+# Commit only the approved standalone release executable.
+release/*
+!release/SmartAdvisorDiscovery-0.1.0.exe
+
+# Local agent and generated analysis data
+.tokensave/
+graphify-out/
