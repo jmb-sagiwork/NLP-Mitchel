@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+build/
+dist/
+reports/
+*.spec
+*.log
+
+# Local agent and generated analysis data
+.tokensave/
+graphify-out/
