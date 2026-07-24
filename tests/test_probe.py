@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from smartadvisor_discovery.probe import selector_match_strategy
+from smartadvisor_automation.probe import selector_match_strategy
 
 
 @dataclass

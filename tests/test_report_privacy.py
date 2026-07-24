@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from smartadvisor_discovery.probe import scan_controls
+from smartadvisor_automation.probe import scan_controls
 
 FORBIDDEN_KEYS = {
     "claim_id",
@@ -32,7 +32,7 @@ def test_report_schema_does_not_contain_sensitive_value_keys(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "smartadvisor_discovery.probe.probe_backend",
+        "smartadvisor_automation.probe.probe_backend",
         lambda backend: {
             "backend": backend,
             "window_status": "not_found",

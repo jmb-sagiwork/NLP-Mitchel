@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$packageName = "SmartAdvisorDiscovery"
-$version = "0.1.0"
+$packageName = "SmartAdvisorAutomation"
+$version = "0.2.0"
 Push-Location $repositoryRoot
 
 try {
@@ -14,7 +14,7 @@ try {
         --specpath build `
         --paths src `
         --collect-submodules pywinauto `
-        src/smartadvisor_discovery/app.py
+        src/smartadvisor_automation/app.py
 
     $packageDirectory = Join-Path $repositoryRoot "dist\$packageName"
     $archivePath = Join-Path $repositoryRoot "dist\$packageName-$version.zip"
@@ -45,7 +45,7 @@ try {
         --distpath release `
         --paths src `
         --collect-submodules pywinauto `
-        src/smartadvisor_discovery/app.py
+        src/smartadvisor_automation/app.py
 
     Write-Output "Package: $packageDirectory"
     Write-Output "Transfer archive: $archivePath"

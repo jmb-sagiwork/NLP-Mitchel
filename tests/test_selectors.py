@@ -1,6 +1,6 @@
 import re
 
-from smartadvisor_discovery.selectors import NO_BILL_ON_FILE_CONTROLS
+from smartadvisor_automation.selectors import NO_BILL_ON_FILE_CONTROLS
 
 
 def test_selector_ids_are_unique_and_nonempty() -> None:
@@ -28,6 +28,16 @@ def test_workflow_contains_expected_steps() -> None:
         "8.3",
         "9",
     ]
+
+
+def test_amount_step_extracts_then_clicks() -> None:
+    amount_control = next(
+        control
+        for control in NO_BILL_ON_FILE_CONTROLS
+        if control.step == "8.3"
+    )
+
+    assert amount_control.action == "extract_click"
 
 
 def test_selector_definitions_do_not_contain_sample_values() -> None:

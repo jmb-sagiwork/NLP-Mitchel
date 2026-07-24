@@ -1,61 +1,66 @@
-# SmartAdvisor Discovery
+# SmartAdvisor Automation
 
-This repository contains the first milestone of the SmartAdvisor Citrix
-automation project: a read-only Windows control validator.
+This repository contains an attended Windows automation for SmartAdvisor's
+**No Bill on File** workflow.
 
-The utility runs **inside the Citrix Windows session** alongside an already
-authenticated SmartAdvisor instance. It tests the `uia` and `win32` pywinauto
-backends against the known controls for the **No Bill on File** workflow.
+The application runs inside the same Citrix Windows session as an already
+authenticated SmartAdvisor instance. The user enters a Claim ID and DOS From,
+then the bot performs the supplied SmartAdvisor steps, reads Patient Account
+and Amount, closes the result window, and displays the result in Tkinter.
 
-It does not click controls, enter search values, extract field values, or modify
-SmartAdvisor records.
+## Automated workflow
+
+1. Click `cboClient`.
+2. Click `_cmdSearch_1`.
+3. Click `263892`, select all text, and clear it.
+4. Click `btnAdvacedSearch`.
+5. Enter Claim ID in `67390`.
+6. Enter DOS From in `67512`.
+7. Click `cmdOK`.
+8. Click `263910`.
+9. Read Patient Account from `198916`.
+10. Read Amount from `329468`, then click that control as specified.
+11. Click `1901400` to close the result window.
+
+The application never stores Claim ID, DOS, Patient Account, or Amount on
+disk. It does not handle SmartAdvisor authentication.
 
 ## Run from source
 
 ```powershell
 python -m pip install -e ".[dev]"
-python -m smartadvisor_discovery
+python -m smartadvisor_automation
 ```
 
-Before scanning:
+Before running:
 
 1. Open Citrix.
 2. Sign in to SmartAdvisor manually.
-3. Navigate to the SmartAdvisor screen you want to validate.
-4. Start the discovery utility inside that same Citrix session.
-5. Select **Scan controls**.
-6. Save the sanitized JSON report.
+3. Leave SmartAdvisor on the screen where `cboClient` is available.
+4. Start the automation inside the same Citrix session.
+5. Enter Claim ID and DOS From.
+6. Select **Run workflow**.
 
-Repeat the scan on the main, search, single-result, not-found, and
-multiple-result screens. Use dummy or approved test records even though the
-report intentionally excludes field values and window text.
+Use **Validate controls** when troubleshooting. Validation is read-only and
+reports only how many known selectors are visible; it does not run the
+workflow.
 
-## Build the Citrix test package
+## Build
 
 ```powershell
 .\scripts\build.ps1
 ```
 
-The executable is created at:
+The build creates:
 
 ```text
-dist\SmartAdvisorDiscovery\SmartAdvisorDiscovery.exe
+dist\SmartAdvisorAutomation-0.2.0.zip
+release\SmartAdvisorAutomation-0.2.0.exe
 ```
 
-PyInstaller uses one-folder mode. Transfer
-`dist\SmartAdvisorDiscovery-0.1.0.zip` into the approved Citrix location,
-extract it, and run `SmartAdvisorDiscovery.exe`. Do not copy the EXE by itself;
-the adjacent runtime files are required.
-
-The build also creates a self-contained executable at:
-
-```text
-release\SmartAdvisorDiscovery-0.1.0.exe
-```
-
-This standalone EXE is committed to the repository for direct download. It can
-start more slowly than the one-folder package because it extracts its runtime
-to a temporary directory on launch.
+The ZIP contains the supported one-folder package. The standalone EXE is
+committed for direct download and may start more slowly because it extracts
+its runtime to a temporary directory.
 
 ## Test
 
@@ -63,17 +68,12 @@ to a temporary directory on launch.
 python -m pytest
 ```
 
-## Data protection
+## Safety
 
-The exported report contains selector metadata only:
+- The user signs in before the automation starts.
+- Inputs and extracted values remain in memory only.
+- Progress and errors use step numbers, not claim or patient data.
+- A selector must match exactly one visible control before any action occurs.
+- Cancellation is checked between steps.
+- No Save, Submit, Update, or Delete control is used by this workflow.
 
-- workflow step;
-- automation ID;
-- backend and matching strategy;
-- control type and class name;
-- visibility and enabled state;
-- screen rectangle;
-- sanitized error type.
-
-It does not include SmartAdvisor window titles, control text, claim IDs,
-patient accounts, dates of service, amounts, usernames, or credentials.

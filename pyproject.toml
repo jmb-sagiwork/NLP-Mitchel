@@ -3,9 +3,9 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "smartadvisor-discovery"
-version = "0.1.0"
-description = "Read-only SmartAdvisor control discovery utility for Citrix"
+name = "smartadvisor-automation"
+version = "0.2.0"
+description = "Attended SmartAdvisor No Bill on File automation for Citrix"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,7 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-smartadvisor-discovery = "smartadvisor_discovery.app:main"
+smartadvisor-automation = "smartadvisor_automation.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
