@@ -35,6 +35,20 @@ The HWND and process ID are discovered at runtime and are never hard-coded.
 Attachment then follows the stable parent hierarchy:
 `Open Bill` window → `Frame1` / `Enter Bill To Edit` group → `cboClient`.
 
+## Object extractor
+
+Use `SmartAdvisorObjectExtractor-0.1.0-x86.exe` when the automation cannot
+reach a parent or control. It is a separate read-only diagnostic utility that:
+
+- discovers SmartAdvisor without requiring the `Frame1` handshake;
+- walks native HWND, UIA, and Win32 trees one node at a time;
+- records parent relationships and per-node traversal failures;
+- saves a JSON report selected through a Save dialog;
+- excludes field values and redacts every unknown control name.
+
+Open SmartAdvisor and the **Open Bill** window before extracting. Send the
+saved `SmartAdvisor-object-report.json` back for selector diagnosis.
+
 ## Run from source
 
 ```powershell
@@ -67,6 +81,7 @@ The build creates:
 ```text
 dist\SmartAdvisorAutomation-0.2.3-x86.zip
 release\SmartAdvisorAutomation-0.2.3-x86.exe
+release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 ```
 
 The ZIP contains the supported one-folder package. The standalone EXE is

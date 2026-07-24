@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 smartadvisor-automation = "smartadvisor_automation.app:main"
+smartadvisor-object-extractor = "smartadvisor_automation.object_extractor_app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

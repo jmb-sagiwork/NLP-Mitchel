@@ -11,6 +11,7 @@ reports/
 # Commit only the approved standalone release executable.
 release/*
 !release/SmartAdvisorAutomation-0.2.3-x86.exe
+!release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
 
 # Local agent and generated analysis data
 .tokensave/

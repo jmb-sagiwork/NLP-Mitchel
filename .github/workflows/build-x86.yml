@@ -27,7 +27,7 @@ jobs:
       - name: Run tests
         run: python -m pytest
 
-      - name: Build standalone executable
+      - name: Build standalone executables
         shell: powershell
         run: .\scripts\build.ps1
 
@@ -37,19 +37,31 @@ jobs:
           import struct
           from pathlib import Path
 
-          executable = Path(
-              "release/SmartAdvisorAutomation-0.2.3-x86.exe"
-          )
-          data = executable.read_bytes()
-          pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
-          machine = struct.unpack_from("<H", data, pe_offset + 4)[0]
-          assert machine == 0x014C, f"Expected x86 PE, got {machine:#06x}"
-          print(f"Verified x86 PE: {executable}")
+          executables = [
+              Path("release/SmartAdvisorAutomation-0.2.3-x86.exe"),
+              Path("release/SmartAdvisorObjectExtractor-0.1.0-x86.exe"),
+          ]
+          for executable in executables:
+              data = executable.read_bytes()
+              pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+              machine = struct.unpack_from("<H", data, pe_offset + 4)[0]
+              assert machine == 0x014C, (
+                  f"Expected x86 PE, got {machine:#06x}: {executable}"
+              )
+              print(f"Verified x86 PE: {executable}")
 
       - name: Upload x86 executable
         uses: actions/upload-artifact@v4
         with:
           name: SmartAdvisorAutomation-0.2.3-x86
           path: release/SmartAdvisorAutomation-0.2.3-x86.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload x86 object extractor
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartAdvisorObjectExtractor-0.1.0-x86
+          path: release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
           if-no-files-found: error
           retention-days: 30

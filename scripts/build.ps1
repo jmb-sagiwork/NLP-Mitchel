@@ -5,6 +5,9 @@ $packageName = "SmartAdvisorAutomation"
 $version = "0.2.3"
 $architecture = python -c "import struct; print('x64' if struct.calcsize('P') == 8 else 'x86')"
 $artifactName = "$packageName-$version-$architecture"
+$extractorName = "SmartAdvisorObjectExtractor"
+$extractorVersion = "0.1.0"
+$extractorArtifactName = "$extractorName-$extractorVersion-$architecture"
 Push-Location $repositoryRoot
 
 try {
@@ -49,11 +52,38 @@ try {
         --collect-submodules pywinauto `
         src/smartadvisor_automation/app.py
 
+    $extractorBuildDirectory = Join-Path $repositoryRoot "build\extractor"
+    New-Item `
+        -ItemType Directory `
+        -Force `
+        -Path $extractorBuildDirectory | Out-Null
+
+    python -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --windowed `
+        --onefile `
+        --name $extractorArtifactName `
+        --specpath $extractorBuildDirectory `
+        --workpath $extractorBuildDirectory `
+        --distpath release `
+        --paths src `
+        --collect-submodules pywinauto `
+        src/smartadvisor_automation/object_extractor_app.py
+
     Write-Output "Package: $packageDirectory"
     Write-Output "Transfer archive: $archivePath"
     Write-Output (
         "Standalone executable: " +
         (Join-Path $repositoryRoot "release\$artifactName.exe")
+    )
+    Write-Output (
+        "Object extractor: " +
+        (
+            Join-Path $repositoryRoot (
+                "release\$extractorArtifactName.exe"
+            )
+        )
     )
 }
 finally {

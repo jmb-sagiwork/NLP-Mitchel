@@ -1,5 +1,8 @@
 from collections.abc import Mapping
 
+from smartadvisor_automation.object_extractor import (
+    extract_smartadvisor_objects,
+)
 from smartadvisor_automation.probe import scan_controls
 
 FORBIDDEN_KEYS = {
@@ -46,4 +49,25 @@ def test_report_schema_does_not_contain_sensitive_value_keys(
     assert FORBIDDEN_KEYS.isdisjoint(_all_keys(report))
     assert report["privacy"]["includes_control_text"] is False
     assert report["privacy"]["includes_field_values"] is False
+
+
+def test_object_report_schema_does_not_contain_sensitive_value_keys(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "smartadvisor_automation.object_extractor."
+        "_native_smartadvisor_handles",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        "smartadvisor_automation.object_extractor."
+        "_preferred_native_handle",
+        lambda _handles: None,
+    )
+
+    report = extract_smartadvisor_objects()
+
+    assert FORBIDDEN_KEYS.isdisjoint(_all_keys(report))
+    assert report["privacy"]["includes_field_values"] is False
+    assert report["privacy"]["includes_unknown_names"] is False
 
