@@ -276,6 +276,50 @@ def _find_open_bill_in_main(main_window: Any) -> Any | None:
     return None
 
 
+def _find_open_bill_process_window(
+    desktop: Any,
+    main_window: Any,
+) -> Any | None:
+    """Find a separate Open Bill top-level window owned by SmartAdvisor."""
+
+    process_id = getattr(main_window.element_info, "process_id", None)
+    if process_id is None:
+        return None
+
+    try:
+        windows = list(
+            desktop.windows(
+                process=int(process_id),
+                visible_only=True,
+                enabled_only=False,
+            )
+        )
+    except Exception:
+        return None
+
+    matches = []
+    for window in windows:
+        info = window.element_info
+        if (
+            _element_name(window).strip().casefold()
+            == OPEN_BILL_WINDOW_TITLE.casefold()
+            and str(getattr(info, "class_name", "") or "").startswith(
+                SMARTADVISOR_WINDOW_CLASS_PREFIX
+            )
+        ):
+            matches.append(window)
+
+    if len(matches) == 1:
+        return matches[0]
+
+    actionable = [
+        window
+        for window in matches
+        if _find_frame_in_open_bill(window) is not None
+    ]
+    return actionable[0] if len(actionable) == 1 else None
+
+
 def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
     """Handshake through Main System -> Open Bill -> Frame1."""
 
@@ -283,9 +327,9 @@ def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
 
     main_handle = _element_handle(main_window)
     desktop = Desktop(backend=backend)
-    open_bill = None
+    open_bill = _find_open_bill_process_window(desktop, main_window)
 
-    if main_handle is not None:
+    if open_bill is None and main_handle is not None:
         open_bill_handles = _native_named_descendants(
             main_handle,
             OPEN_BILL_WINDOW_TITLE,

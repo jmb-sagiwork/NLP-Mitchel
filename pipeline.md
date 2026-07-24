@@ -642,6 +642,24 @@ Likely implementation directions after the report:
 
 Absolute coordinates remain a last resort.
 
+### 14.1 July 25 object-report result
+
+The returned extractor report completed without errors or truncation and found
+the exact SmartAdvisor main window. It enumerated 47 process windows, but did
+not expose `Open Bill`, `Frame1`, or `cboClient` in the captured native, UIA, or
+Win32 trees.
+
+The safe discovery expansion implemented from this evidence is to enumerate
+all visible top-level windows owned by the discovered SmartAdvisor process
+before searching the main-window descendant chain. Candidate `Open Bill`
+windows still require the exact WinForms title/class identity, and an ambiguous
+set is accepted only when exactly one candidate contains a valid `Frame1`.
+Native descendant and UIA subtree fallbacks remain unchanged.
+
+A future capture with `Open Bill`, `Enter Bill To Edit`, and `cboClient`
+visible is still required to prove their actual backend/root relationship.
+No selector, coordinate, hard-coded handle, or field-value logging was added.
+
 ## 15. Release and Commit Ledger
 
 | Commit/run | Purpose |
@@ -700,9 +718,12 @@ As of July 25, 2026:
 - The explicit `Open Bill` → `Frame1` handshake still fails in the user's
   Citrix environment.
 - A separate object extractor is published and ready.
-- The next action belongs to the user: run the extractor with Open Bill visible
-  and return the generated JSON.
-- The next development action is to analyze that JSON, prove the real
-  backend/root/parent path, and then update the attach logic.
+- The returned object report was analyzed; it found the main window and 47
+  process windows but did not expose `Open Bill`, `Frame1`, or `cboClient`.
+- Attachment now searches visible SmartAdvisor process top-level windows before
+  falling back to the main-window descendant chain.
+- The next user validation is to run the updated automation with `Open Bill`
+  visible. If the landmark still fails, capture a new report with `Frame1` and
+  `cboClient` visibly present to prove their backend/root/parent path.
 - Do not reintroduce x64 builds, hard-coded HWNDs/process IDs, raw field
   logging, or coordinate-first automation.
