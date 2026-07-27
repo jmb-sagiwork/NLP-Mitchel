@@ -14,6 +14,10 @@ from smartadvisor_automation.probe import (
     find_smartadvisor_window,
     matching_elements,
 )
+from smartadvisor_automation.selectors import (
+    MAIN_TOOLBAR_AUTOMATION_ID,
+    OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID,
+)
 
 
 class SmartAdvisorDriver:
@@ -53,6 +57,7 @@ class SmartAdvisorDriver:
         )
         saw_smartadvisor_window = False
         saw_open_bill_frame = False
+        attempted_launch = False
         attempt = 0
 
         while True:
@@ -97,6 +102,9 @@ class SmartAdvisorDriver:
                     )
                     continue
                 if landmark_scope is None:
+                    if not attempted_launch and backend == "uia":
+                        attempted_launch = True
+                        self._launch_open_bill(window, trace=trace)
                     continue
                 saw_open_bill_frame = True
 
@@ -142,6 +150,45 @@ class SmartAdvisorDriver:
         raise AutomationError(
             code, step=landmark.step, diagnostics=trace.to_report()
         )
+
+    @staticmethod
+    def _launch_open_bill(
+        main_window: Any, *, trace: DiagnosticTrace
+    ) -> None:
+        """Click the main toolbar's Open Bill launcher if it isn't open yet.
+
+        Only tried once per attach() call (see `attempted_launch`), since
+        every resolution strategy already failed to find Open Bill by the
+        time this runs - clicking again on a later retry could open a
+        second, ambiguous copy instead of just waiting for the first one
+        to render.
+        """
+
+        stage = "open_bill_launch"
+        toolbar = find_direct_uia_control(
+            "uia", main_window, MAIN_TOOLBAR_AUTOMATION_ID
+        )
+        if toolbar is None:
+            trace.record(stage, "uia", "toolbar_not_found")
+            return
+
+        button = find_direct_uia_control(
+            "uia", toolbar, OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID
+        )
+        if button is None:
+            trace.record(stage, "uia", "button_not_found")
+            return
+
+        try:
+            button.set_focus()
+            button.click_input()
+        except Exception as exc:
+            trace.record(
+                stage, "uia", "click_failed", exception=type(exc).__name__
+            )
+            return
+
+        trace.record(stage, "uia", "clicked")
 
     def _windows_for_process(self) -> list[Any]:
         if self.backend is None or self.process_id is None:

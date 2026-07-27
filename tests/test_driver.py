@@ -159,3 +159,58 @@ def test_attach_retries_while_open_bill_still_renders(monkeypatch) -> None:
 
     assert driver.attach(CONTROLS_BY_STEP["1"], timeout=1.0) == "uia"
     assert attempts["count"] >= 3
+
+
+def test_attach_clicks_open_bill_launch_button_when_not_open(
+    monkeypatch,
+) -> None:
+    """If Open Bill isn't open yet, attach should click the toolbar
+    button that opens it, then keep polling for it to render."""
+
+    window = SimpleNamespace(element_info=SimpleNamespace(process_id=1234))
+    toolbar = SimpleNamespace(element_info=SimpleNamespace(automation_id="Toolbar1"))
+    clicks = {"set_focus": 0, "click_input": 0}
+    button = SimpleNamespace(
+        element_info=SimpleNamespace(automation_id="_Toolbar1_Button2"),
+        set_focus=lambda: clicks.__setitem__("set_focus", clicks["set_focus"] + 1),
+        click_input=lambda: clicks.__setitem__(
+            "click_input", clicks["click_input"] + 1
+        ),
+    )
+
+    def fake_find_direct_uia_control(_backend, parent, automation_id):
+        if parent is window and automation_id == "Toolbar1":
+            return toolbar
+        if parent is toolbar and automation_id == "_Toolbar1_Button2":
+            return button
+        return None
+
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_smartadvisor_window",
+        lambda _backend, **_kwargs: window,
+    )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_open_bill_frame",
+        lambda _backend, _window, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_direct_uia_control",
+        fake_find_direct_uia_control,
+    )
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+
+    with pytest.raises(AutomationError) as captured:
+        driver.attach(CONTROLS_BY_STEP["1"], timeout=0.2)
+
+    assert (
+        captured.value.code
+        == "smartadvisor_open_bill_frame_not_accessible"
+    )
+    assert clicks == {"set_focus": 1, "click_input": 1}
+
+    launch_steps = [
+        step
+        for step in captured.value.diagnostics["steps"]
+        if step["stage"] == "open_bill_launch"
+    ]
+    assert [step["outcome"] for step in launch_steps] == ["clicked"]

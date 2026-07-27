@@ -283,7 +283,7 @@ This section supersedes conflicting assumptions in the original plan.
 - Packager: PyInstaller one-file executable.
 - Required build architecture: x86 (`PE machine 0x014C`).
 - Current workflow executable:
-  `release/SmartAdvisorAutomation-0.2.7-x86.exe`.
+  `release/SmartAdvisorAutomation-0.2.8-x86.exe`.
 - Current diagnostic executable:
   `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
 - Current automated test count: 37 passing.
@@ -305,6 +305,7 @@ not repeated in this document.
 
 | Step | Automation ID | Purpose | Action |
 |---|---|---|---|
+| 0 | `_Toolbar1_Button2` (via `Toolbar1` on the main window) | Open the Open Bill window, only if not already open | Click |
 | 1 | `cboClient` | Open bill/client selection | Click |
 | 2 | `_cmdSearch_1` | Additional search options (`...`) | Click |
 | 3 | `263892` | Search/input box | Click, select all, clear |
@@ -950,3 +951,56 @@ show a real `window_count` (all top-level windows this process can see) —
 if that count itself is implausibly low, the remaining hypothesis moves to
 a session/window-station boundary between the automation process and
 SmartAdvisor rather than anything in the resolver logic.
+
+### 17.5 Automate opening Open Bill itself (0.2.8)
+
+Every prior version required the user to manually open the `Open Bill`
+window before running a search. The user captured a live Inspect.exe
+parent chain (`first test.xlsx`) for the toolbar button that opens it:
+
+```text
+_Toolbar1_Button2  (found by mouse-hover; likely AutomationId given this
+                    app's `_<Parent>_<Type><Index>` naming convention,
+                    matching `_cmdSearch_0`/`_cmdSearch_1` already in use)
+  └── parent: Toolbar1  (AutomationId "Toolbar1", ControlType ToolBar)
+        └── parent: SmartAdvisor Main System  (AutomationId "bilMain")
+```
+
+`ProcessId` was `32968` at all three levels this time - consistent, unlike
+the process-ID assumption that broke `attach()` in 0.2.3-0.2.6. But the
+`ProviderDescription` for the top two levels showed a nested MSAA proxy
+chain (`pid:23848` outer, `pid:32968` inner), independently confirming why
+process-ID filtering was unreliable: this WinForms app isn't natively
+UIA-aware and is bridged through `uiautomationcore.dll`'s MSAA proxy, so
+which PID a given read returns depends on which provider layer served it.
+This corroborates the 0.2.7 fix rather than contradicting it.
+
+`Toolbar1` is also a direct child of the main window in the July 24 object
+report (`uia:00004`, parent `uia:00001`), so both captures, three days
+apart, agree on that boundary.
+
+Implementation:
+
+- `selectors.py` adds `MAIN_TOOLBAR_AUTOMATION_ID = "Toolbar1"` and
+  `OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID = "_Toolbar1_Button2"`.
+- `SmartAdvisorDriver._launch_open_bill()` resolves `Toolbar1` as a direct
+  UIA child of the main window, then the button as a direct child of
+  `Toolbar1` (reusing `find_direct_uia_control`, uia backend only), and
+  clicks it.
+- `attach()` calls this **at most once per `attach()` call** - only when
+  every existing Open Bill resolution strategy has already failed on the
+  `uia` backend pass, guarded by an `attempted_launch` flag. It is not
+  retried on every poll iteration: clicking a second time while the first
+  click is still rendering could open a second, ambiguous `Open Bill`
+  copy instead of just waiting for the existing 0.2.6 retry loop to see
+  the first one appear.
+- Regression test `test_attach_clicks_open_bill_launch_button_when_not_open`
+  asserts exactly one `set_focus()`/`click_input()` pair across a full
+  retry window, and exactly one `open_bill_launch` trace entry.
+
+**Next action:** run 0.2.8 without opening Open Bill manually first. If
+`_Toolbar1_Button2` is not actually this button's `AutomationId` (Inspect's
+condensed hover capture only listed a subset of fields), the trace will
+show `open_bill_launch` / `button_not_found`, and the next Inspect capture
+should confirm the `AutomationId:` field explicitly rather than relying on
+`Name:`.
