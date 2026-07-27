@@ -54,6 +54,17 @@ reach a parent or control. It is a separate read-only diagnostic utility that:
 Open SmartAdvisor and the **Open Bill** window before extracting. Send the
 saved `SmartAdvisor-object-report.json` back for selector diagnosis.
 
+## Control picker
+
+Use `SmartAdvisorControlPicker-0.1.0-x86.exe` when a control's
+`AutomationId` is unknown or a guess turned out wrong. Starting from the
+SmartAdvisor main window, it highlights one child at a time on screen and
+asks: **No** (next sibling), **Yes** (right branch, but a container - dig
+into its children), or **Final** (this exact control - stop here). It never
+clicks, types, or submits anything in SmartAdvisor; it only highlights and
+asks. Save the report and send it back so the real `AutomationId` can
+replace a guess in `selectors.py`.
+
 ## Run from source
 
 ```powershell
@@ -87,6 +98,7 @@ The build creates:
 dist\SmartAdvisorAutomation-0.2.8-x86.zip
 release\SmartAdvisorAutomation-0.2.8-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
+release\SmartAdvisorControlPicker-0.1.0-x86.exe
 ```
 
 The ZIP contains the supported one-folder package. The standalone EXE is

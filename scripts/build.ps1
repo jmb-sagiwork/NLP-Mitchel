@@ -8,6 +8,9 @@ $artifactName = "$packageName-$version-$architecture"
 $extractorName = "SmartAdvisorObjectExtractor"
 $extractorVersion = "0.1.0"
 $extractorArtifactName = "$extractorName-$extractorVersion-$architecture"
+$pickerName = "SmartAdvisorControlPicker"
+$pickerVersion = "0.1.0"
+$pickerArtifactName = "$pickerName-$pickerVersion-$architecture"
 Push-Location $repositoryRoot
 
 try {
@@ -71,6 +74,25 @@ try {
         --collect-submodules pywinauto `
         src/smartadvisor_automation/object_extractor_app.py
 
+    $pickerBuildDirectory = Join-Path $repositoryRoot "build\picker"
+    New-Item `
+        -ItemType Directory `
+        -Force `
+        -Path $pickerBuildDirectory | Out-Null
+
+    python -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --windowed `
+        --onefile `
+        --name $pickerArtifactName `
+        --specpath $pickerBuildDirectory `
+        --workpath $pickerBuildDirectory `
+        --distpath release `
+        --paths src `
+        --collect-submodules pywinauto `
+        src/smartadvisor_automation/control_picker_app.py
+
     Write-Output "Package: $packageDirectory"
     Write-Output "Transfer archive: $archivePath"
     Write-Output (
@@ -82,6 +104,14 @@ try {
         (
             Join-Path $repositoryRoot (
                 "release\$extractorArtifactName.exe"
+            )
+        )
+    )
+    Write-Output (
+        "Control picker: " +
+        (
+            Join-Path $repositoryRoot (
+                "release\$pickerArtifactName.exe"
             )
         )
     )

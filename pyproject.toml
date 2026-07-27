@@ -21,6 +21,7 @@ dev = [
 [project.scripts]
 smartadvisor-automation = "smartadvisor_automation.app:main"
 smartadvisor-object-extractor = "smartadvisor_automation.object_extractor_app:main"
+smartadvisor-control-picker = "smartadvisor_automation.control_picker_app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

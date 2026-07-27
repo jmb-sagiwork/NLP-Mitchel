@@ -40,6 +40,7 @@ jobs:
           executables = [
               Path("release/SmartAdvisorAutomation-0.2.8-x86.exe"),
               Path("release/SmartAdvisorObjectExtractor-0.1.0-x86.exe"),
+              Path("release/SmartAdvisorControlPicker-0.1.0-x86.exe"),
           ]
           for executable in executables:
               data = executable.read_bytes()
@@ -63,5 +64,13 @@ jobs:
         with:
           name: SmartAdvisorObjectExtractor-0.1.0-x86
           path: release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload x86 control picker
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartAdvisorControlPicker-0.1.0-x86
+          path: release/SmartAdvisorControlPicker-0.1.0-x86.exe
           if-no-files-found: error
           retention-days: 30

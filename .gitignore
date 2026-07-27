@@ -7,13 +7,15 @@ dist/
 reports/
 SmartAdvisor*_object_report*.txt
 SmartAdvisor-object-report*.json
+SmartAdvisor-control-report*.json
 *.spec
 *.log
 
-# Commit only the approved standalone release executable.
+# Commit only the approved standalone release executables.
 release/*
 !release/SmartAdvisorAutomation-0.2.8-x86.exe
 !release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
+!release/SmartAdvisorControlPicker-0.1.0-x86.exe
 
 # Local agent and generated analysis data
 .tokensave/

@@ -783,6 +783,9 @@ https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/Sm
 | `tests/test_object_extractor.py` | Tree traversal, truncation, parent, and redaction tests |
 | `tests/test_report_privacy.py` | Report schema privacy gates |
 | `src/smartadvisor_automation/diagnostics.py` | Redacted step-by-step attach trace collector |
+| `src/smartadvisor_automation/control_picker.py` | Highlight-and-confirm control walk (generator) and redacted report builder |
+| `src/smartadvisor_automation/control_picker_app.py` | Standalone control picker Tkinter UI |
+| `tests/test_control_picker.py` | Walk state-machine and report-shape regression tests |
 
 ## 17. Current Handoff State
 
@@ -1004,3 +1007,85 @@ condensed hover capture only listed a subset of fields), the trace will
 show `open_bill_launch` / `button_not_found`, and the next Inspect capture
 should confirm the `AutomationId:` field explicitly rather than relying on
 `Name:`.
+
+### 17.6 0.2.8 confirmed the guess was wrong; added an interactive control picker
+
+The user ran 0.2.8: `open_bill_launch` recorded `button_not_found` -
+`Toolbar1` resolved correctly, but `_Toolbar1_Button2` did not match any
+direct child, confirming the `Name:`-as-`AutomationId` guess from the
+mouse-hover Inspect capture was wrong.
+
+Rather than request another manual Inspect.exe capture and guess again,
+the user proposed a new tool: starting from a parent, highlight one child
+at a time and let the user confirm which one they mean, instead of
+inferring an `AutomationId` from a name. Built as
+`SmartAdvisorControlPicker`, a third standalone read-only executable:
+
+- `control_picker.py`'s `walk()` is a generator driven by three answers per
+  highlighted candidate: `"no"` (next sibling), `"yes"` (this is the right
+  branch but a container, not the target - descend into its children and
+  restart the sibling walk one level deeper), `"final"` (this exact node is
+  the one to click - stop and return it with its siblings).
+- Starts at the SmartAdvisor main window (`find_smartadvisor_window`,
+  already proven), so it can reach any control, not just this one button.
+- Highlighting reuses pywinauto's built-in `wrapper.draw_outline()`,
+  re-issued on a timer while the confirm dialog is open (Tk `after()`
+  keeps firing during the dialog's own nested wait, so the outline stays
+  visible instead of being erased by the next repaint).
+- The saved report reuses the object extractor's exact redaction rules
+  (`sanitize_name`/`_uia_node` from `object_extractor.py`) - automation
+  ID/control type/class/bounds only, names redacted unless on the
+  structural allowlist.
+- Strictly read-only: it highlights and asks, it never calls
+  `click_input()` on anything in SmartAdvisor itself. Turning a confirmed
+  match into an actual automated click is still a separate step - patch
+  the real `AutomationId` into `selectors.py`/`driver.py` and publish a
+  new `SmartAdvisorAutomation` build, same as every prior fix.
+- `tests/test_control_picker.py` covers the generator's state machine
+  (advance-on-no, descend-on-yes, stop-on-final, both error codes) and the
+  report shape, using the same `SimpleNamespace` fixture style as the rest
+  of the test suite - no pywinauto/Tkinter dependency needed to test the
+  logic.
+
+**Next action:** run the control picker starting at `Toolbar1`, confirm the
+real Open Bill launcher with **Final**, and send back the saved report. Its
+`confirmed.automation_id` replaces the guessed
+`OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID` in `selectors.py`.
+
+## 18. Control Picker Runbook
+
+Download:
+
+```text
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorControlPicker-0.1.0-x86.exe
+```
+
+Use this whenever a control's `AutomationId` is unknown or a guess turned
+out wrong (as happened with the Open Bill launcher button) - instead of
+another manual Inspect.exe capture, confirm the real control visually.
+
+Before starting:
+
+1. Enter the Citrix desktop containing SmartAdvisor.
+2. Sign in to SmartAdvisor manually.
+3. Have the relevant screen/menu visible (the picker always starts at the
+   SmartAdvisor main window and walks down from there).
+4. Run the picker in the same session and at the same elevation level.
+
+Walking:
+
+1. Select **Start walk**. The first child of the main window is
+   highlighted in red on screen and a confirm dialog appears.
+2. For each highlighted control:
+   - **No** - not this one, move to the next sibling.
+   - **Yes (dig deeper)** - this is the right branch, but it's a container
+     (like a toolbar or menu), not the control itself; descend into its
+     children.
+   - **Final (this is it)** - this exact control is the one to click; the
+     walk stops here.
+3. Save the report (default `SmartAdvisor-control-report.json`) and attach
+   it to the development conversation.
+
+The report's `confirmed.automation_id` (and `control_type`/`class_name`)
+is what gets hardcoded into `selectors.py` - the picker itself never
+clicks anything in SmartAdvisor.
