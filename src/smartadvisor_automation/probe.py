@@ -329,23 +329,20 @@ def _find_open_bill_process_window(
     *,
     trace: DiagnosticTrace | None = None,
 ) -> Any | None:
-    """Find a separate Open Bill top-level window owned by SmartAdvisor."""
+    """Find Open Bill by its own exact identity, independent of any
+    assumption that it shares the main window's process ID.
+
+    A Citrix-hosted modal is not guaranteed to report the same process ID
+    as its logical parent, so this scans every top-level window rather than
+    pre-filtering by `main_window`'s process, the same way the main window
+    itself is found by identity alone.
+    """
 
     stage = "process_window_title_search"
-    process_id = getattr(main_window.element_info, "process_id", None)
-    if process_id is None:
-        if trace:
-            trace.record(stage, "any", "no_process_id")
-        return None
+    main_process_id = getattr(main_window.element_info, "process_id", None)
 
     try:
-        windows = list(
-            desktop.windows(
-                process=int(process_id),
-                visible_only=True,
-                enabled_only=False,
-            )
-        )
+        windows = list(desktop.windows())
     except Exception as exc:
         if trace:
             trace.record(
@@ -370,11 +367,18 @@ def _find_open_bill_process_window(
 
     if len(matches) == 1:
         if trace:
+            matched_process_id = getattr(
+                matches[0].element_info, "process_id", None
+            )
             trace.record(
                 stage,
                 "any",
                 "resolved",
-                process_window_count=len(windows),
+                window_count=len(windows),
+                same_process=(
+                    main_process_id is not None
+                    and matched_process_id == main_process_id
+                ),
             )
         return matches[0]
 
@@ -398,7 +402,7 @@ def _find_open_bill_process_window(
             stage,
             "any",
             "title_not_uniquely_matched",
-            process_window_count=len(windows),
+            window_count=len(windows),
             title_match_count=len(matches),
         )
     return None
@@ -419,23 +423,19 @@ def _strict_uia_open_bill_frame(
     *,
     trace: DiagnosticTrace | None = None,
 ) -> Any | None:
-    """Resolve the exact hierarchy proven by the object extractor."""
+    """Resolve the exact hierarchy proven by the object extractor.
+
+    Open Bill is matched by its own exact identity across every top-level
+    UIA window, not pre-filtered to `main_window`'s process ID - a
+    Citrix-hosted modal is not guaranteed to report the same process as its
+    logical parent.
+    """
 
     stage = "strict_uia_hierarchy"
-    process_id = getattr(main_window.element_info, "process_id", None)
-    if process_id is None:
-        if trace:
-            trace.record(stage, "uia", "no_process_id")
-        return None
+    main_process_id = getattr(main_window.element_info, "process_id", None)
 
     try:
-        process_windows = list(
-            desktop.windows(
-                process=int(process_id),
-                visible_only=True,
-                enabled_only=False,
-            )
-        )
+        all_windows = list(desktop.windows())
     except Exception as exc:
         if trace:
             trace.record(
@@ -447,7 +447,7 @@ def _strict_uia_open_bill_frame(
         return None
 
     open_bill_matches = []
-    for window in process_windows:
+    for window in all_windows:
         info = window.element_info
         if (
             str(getattr(info, "automation_id", "") or "")
@@ -467,10 +467,24 @@ def _strict_uia_open_bill_frame(
                 stage,
                 "uia",
                 "open_bill_not_uniquely_matched",
-                process_window_count=len(process_windows),
+                window_count=len(all_windows),
                 open_bill_match_count=len(open_bill_matches),
             )
         return None
+
+    if trace:
+        matched_process_id = getattr(
+            open_bill_matches[0].element_info, "process_id", None
+        )
+        trace.record(
+            stage,
+            "uia",
+            "open_bill_matched",
+            same_process=(
+                main_process_id is not None
+                and matched_process_id == main_process_id
+            ),
+        )
 
     frame_matches = []
     for info in _direct_element_children(
@@ -800,7 +814,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.2.6",
+        "utility_version": "0.2.7",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

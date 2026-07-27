@@ -156,12 +156,53 @@ def test_find_open_bill_frame_searches_process_top_level_windows(
     )
 
     class FakeDesktop:
-        def windows(self, **kwargs):
-            assert kwargs == {
-                "process": 1234,
-                "visible_only": True,
-                "enabled_only": False,
-            }
+        def windows(self):
+            return [main_window, open_bill]
+
+    fake_pywinauto = SimpleNamespace(
+        Desktop=lambda backend: FakeDesktop(),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "pywinauto",
+        fake_pywinauto,
+    )
+
+    assert find_open_bill_frame("uia", main_window) is frame
+
+
+def test_find_open_bill_frame_matches_open_bill_on_different_process(
+    monkeypatch,
+) -> None:
+    """A Citrix-hosted modal may not share the main window's process ID."""
+
+    winforms_class = "WindowsForms10.Window.8.app.0.dynamic_ad1"
+    frame = SimpleNamespace(
+        element_info=SimpleNamespace(
+            handle=300,
+            automation_id="Frame1",
+            class_name=winforms_class,
+            name="Enter Bill To Edit",
+        ),
+        window_text=lambda: "Enter Bill To Edit",
+    )
+    open_bill = SimpleNamespace(
+        element_info=SimpleNamespace(
+            handle=200,
+            automation_id="",
+            class_name=winforms_class,
+            name="Open Bill",
+            process_id=9999,
+        ),
+        window_text=lambda: "Open Bill",
+        descendants=lambda: [frame],
+    )
+    main_window = SimpleNamespace(
+        element_info=SimpleNamespace(handle=100, process_id=1234),
+    )
+
+    class FakeDesktop:
+        def windows(self):
             return [main_window, open_bill]
 
     fake_pywinauto = SimpleNamespace(
@@ -213,12 +254,7 @@ def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
     client = SimpleNamespace(element_info=client_info)
 
     class FakeDesktop:
-        def windows(self, **kwargs):
-            assert kwargs == {
-                "process": 1234,
-                "visible_only": True,
-                "enabled_only": False,
-            }
+        def windows(self):
             return [main_window, open_bill]
 
         def window(self, **criteria):

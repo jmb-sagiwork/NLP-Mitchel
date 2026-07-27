@@ -283,7 +283,7 @@ This section supersedes conflicting assumptions in the original plan.
 - Packager: PyInstaller one-file executable.
 - Required build architecture: x86 (`PE machine 0x014C`).
 - Current workflow executable:
-  `release/SmartAdvisorAutomation-0.2.6-x86.exe`.
+  `release/SmartAdvisorAutomation-0.2.7-x86.exe`.
 - Current diagnostic executable:
   `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
 - Current automated test count: 37 passing.
@@ -900,3 +900,53 @@ attach should now succeed without any other change. If it still fails,
 the process-window enumeration itself cannot see Open Bill under this
 Citrix session regardless of timing, which would point at a `visible_only`
 or cross-process visibility boundary instead.
+
+### 17.4 Second live trace: retry ruled out timing, pointed at a process/visibility assumption (0.2.7)
+
+The user ran 0.2.6 and returned a second trace. It confirmed the retry loop
+itself works — `attempt: 2` and `attempt: 3` markers are present, spanning
+the full ~6s window — but `process_window_count` stayed at `1` on every
+single attempt, on both backends. This rules out timing/rendering lag as
+the cause: Open Bill was consistently invisible to
+`Desktop(backend).windows(process=main_pid, visible_only=True,
+enabled_only=False)` regardless of how long the resolver waited.
+
+The user then raised the right question directly: every SmartAdvisor modal
+may not share its logical parent's process ID under Citrix. That single
+question exposed the actual design flaw. Every resolution strategy since
+`fa46243` (0.2.3's original handshake) assumed Open Bill would be found by
+first filtering `desktop.windows(process=main_window_process_id, ...)` —
+an assumption the June 24 object report's own success never actually
+proved, because the extractor's `native_process_windows()` enumerates every
+top-level window matching one process ID and simply never had to prove
+that ID matched the *main* window's ID for a modal specifically; it only
+had to prove Open Bill's own process ID was internally consistent within
+that one capture.
+
+Under Citrix seamless-window delivery, a modal's window can plausibly be
+tracked under a different process ID than its logical parent, and/or its
+`visible_only` state can differ from what native rendering suggests. Rather
+than pick one guess, version 0.2.7 removes the assumption entirely instead
+of adding another filter:
+
+- `_strict_uia_open_bill_frame` and `_find_open_bill_process_window` now
+  call `desktop.windows()` with **no process or visibility filter** and
+  match Open Bill purely by its own exact identity (`automation_id`, name,
+  control type, class prefix) — precisely the same way the main window
+  itself is already found, and the same exact-match strictness as before
+  (still requires exactly one match).
+- When Open Bill resolves, the trace now records `same_process` (whether
+  its process ID actually matches the main window's) so the next trace
+  proves, rather than guesses, whether cross-process modals are real in
+  this environment.
+- Added `test_find_open_bill_frame_matches_open_bill_on_different_process`,
+  which fails against the old process-scoped lookup and passes against the
+  new identity-only lookup.
+
+**Next action:** run 0.2.7. If this resolves it, `same_process` in the
+saved trace will show whether it was a process-ID mismatch, a visibility
+filter, or both. If it still fails, the next trace will for the first time
+show a real `window_count` (all top-level windows this process can see) —
+if that count itself is implausibly low, the remaining hypothesis moves to
+a session/window-station boundary between the automation process and
+SmartAdvisor rather than anything in the resolver logic.
