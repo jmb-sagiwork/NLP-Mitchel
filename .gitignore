@@ -13,7 +13,7 @@ SmartAdvisor-control-report*.json
 
 # Commit only the approved standalone release executables.
 release/*
-!release/SmartAdvisorAutomation-0.2.8-x86.exe
+!release/SmartAdvisorAutomation-0.2.9-x86.exe
 !release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
 !release/SmartAdvisorControlPicker-0.1.0-x86.exe
 

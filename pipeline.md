@@ -283,7 +283,7 @@ This section supersedes conflicting assumptions in the original plan.
 - Packager: PyInstaller one-file executable.
 - Required build architecture: x86 (`PE machine 0x014C`).
 - Current workflow executable:
-  `release/SmartAdvisorAutomation-0.2.8-x86.exe`.
+  `release/SmartAdvisorAutomation-0.2.9-x86.exe`.
 - Current diagnostic executable:
   `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
 - Current automated test count: 37 passing.
@@ -1051,6 +1051,62 @@ inferring an `AutomationId` from a name. Built as
 real Open Bill launcher with **Final**, and send back the saved report. Its
 `confirmed.automation_id` replaces the guessed
 `OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID` in `selectors.py`.
+
+### 17.7 The picker found the launcher has no identity at all; switched to Ctrl+O (0.2.9)
+
+The user ran the control picker three times and sent back all three saved
+reports (`toolbar1`, `triple dot`, `openbill`):
+
+1. **`toolbar1`** - `Final` was picked on `Toolbar1` itself (a `ToolBar`
+   container, not a button). Useful anyway: it independently confirmed
+   `Toolbar1`'s siblings under the main window (`staStatusBar`,
+   `MainMenu1`, the MDI client pane, the title bar), matching the July 24
+   object report's main-window children exactly.
+2. **`triple dot`** - `Final` was picked on `_cmdSearch_1`, a sibling of
+   `cboClient`/`chkReadOnly`/`_txtData_1`/`_lblFld_0`/`_lblFld_1`/
+   `_cmdSearch_0`. This is the *already-implemented* step 2 selector
+   inside Open Bill's `Frame1` group (`"Additional search options"`) - a
+   valid confirmation of an existing selector, not new information about
+   the launcher button.
+3. **`openbill`** - `Final` was picked on the actual toolbar icon. Its
+   record: `automation_id: ""`, `control_id: null`, `class_name: ""`,
+   `framework_id: ""`, `handle: null`, `runtime_id: []` - every identity
+   field empty. UIA exposes it only as a generic `Custom`-typed element
+   with a bounding rectangle, nothing else. The sibling list's rectangles
+   are mostly left-to-right increasing but jump backward two-thirds of the
+   way through (`...680, 645, 79, 718...`), consistent with the nested
+   MSAA-proxy duplication already documented in 11.9 and the user's own
+   Excel capture (`pid:23848`/`pid:32968` nesting) - meaning even a
+   position/index-based selector could not be trusted to stay stable.
+
+No existing or planned selector strategy (`AutomationId`, numeric
+`control_id`, direct-child position) can safely target a control with none
+of those. Rather than accept that risk against a real claims application,
+the user proposed the actual fix: this button is equivalent to the
+keyboard accelerator **Ctrl+O**, and after opening Open Bill this way, the
+already-implemented step 2 (`_cmdSearch_1`, the "triple dot" control
+independently confirmed above) is the very next interaction - exactly the
+existing workflow, unchanged.
+
+Version 0.2.9:
+
+- `SmartAdvisorDriver._launch_open_bill()` now sends `Ctrl+O`
+  (`main_window.set_focus()` then `.type_keys("^o")`) instead of resolving
+  and clicking a toolbar button.
+- Removed `MAIN_TOOLBAR_AUTOMATION_ID` and
+  `OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID` from `selectors.py` - dead code
+  for a selector strategy that could never have worked.
+- `test_attach_sends_ctrl_o_when_open_bill_not_open` replaces the old
+  toolbar-click regression test.
+
+**Next action:** run 0.2.9 without opening Open Bill manually first and
+confirm Ctrl+O opens it. If the shortcut doesn't fire reliably (e.g. focus
+timing), the trace's `open_bill_launch` stage will show `shortcut_sent`
+regardless of whether SmartAdvisor actually responded - the existing
+retry loop already re-checks for Open Bill afterward, so a slow response
+should still resolve on a later attempt; a shortcut that reliably does
+nothing would need a different signal (e.g. checking the menu's own
+accelerator text) rather than assuming Ctrl+O universally.
 
 ## 18. Control Picker Runbook
 

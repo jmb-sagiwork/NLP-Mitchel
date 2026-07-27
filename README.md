@@ -95,8 +95,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.2.8-x86.zip
-release\SmartAdvisorAutomation-0.2.8-x86.exe
+dist\SmartAdvisorAutomation-0.2.9-x86.zip
+release\SmartAdvisorAutomation-0.2.9-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 release\SmartAdvisorControlPicker-0.1.0-x86.exe
 ```

@@ -14,10 +14,6 @@ from smartadvisor_automation.probe import (
     find_smartadvisor_window,
     matching_elements,
 )
-from smartadvisor_automation.selectors import (
-    MAIN_TOOLBAR_AUTOMATION_ID,
-    OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID,
-)
 
 
 class SmartAdvisorDriver:
@@ -155,40 +151,37 @@ class SmartAdvisorDriver:
     def _launch_open_bill(
         main_window: Any, *, trace: DiagnosticTrace
     ) -> None:
-        """Click the main toolbar's Open Bill launcher if it isn't open yet.
+        """Send Ctrl+O to the main window to open Open Bill.
+
+        The toolbar button that does the same thing turned out to have no
+        AutomationId, control_id, class_name, or handle at all - a
+        synthetic MSAA "Custom" element identifiable only by its position,
+        and the sibling list showed signs of the same provider-duplication
+        issue documented in pipeline.md 11.9, making a position-based click
+        unreliable to click safely. Ctrl+O is the application's own
+        keyboard accelerator for the same action.
 
         Only tried once per attach() call (see `attempted_launch`), since
         every resolution strategy already failed to find Open Bill by the
-        time this runs - clicking again on a later retry could open a
-        second, ambiguous copy instead of just waiting for the first one
-        to render.
+        time this runs - sending the shortcut again on a later retry could
+        open a second, ambiguous copy instead of just waiting for the
+        first one to render.
         """
 
         stage = "open_bill_launch"
-        toolbar = find_direct_uia_control(
-            "uia", main_window, MAIN_TOOLBAR_AUTOMATION_ID
-        )
-        if toolbar is None:
-            trace.record(stage, "uia", "toolbar_not_found")
-            return
-
-        button = find_direct_uia_control(
-            "uia", toolbar, OPEN_BILL_LAUNCH_BUTTON_AUTOMATION_ID
-        )
-        if button is None:
-            trace.record(stage, "uia", "button_not_found")
-            return
-
         try:
-            button.set_focus()
-            button.click_input()
+            main_window.set_focus()
+            main_window.type_keys("^o")
         except Exception as exc:
             trace.record(
-                stage, "uia", "click_failed", exception=type(exc).__name__
+                stage,
+                "uia",
+                "shortcut_failed",
+                exception=type(exc).__name__,
             )
             return
 
-        trace.record(stage, "uia", "clicked")
+        trace.record(stage, "uia", "shortcut_sent")
 
     def _windows_for_process(self) -> list[Any]:
         if self.backend is None or self.process_id is None:

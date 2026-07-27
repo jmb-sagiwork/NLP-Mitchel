@@ -161,29 +161,19 @@ def test_attach_retries_while_open_bill_still_renders(monkeypatch) -> None:
     assert attempts["count"] >= 3
 
 
-def test_attach_clicks_open_bill_launch_button_when_not_open(
-    monkeypatch,
-) -> None:
-    """If Open Bill isn't open yet, attach should click the toolbar
-    button that opens it, then keep polling for it to render."""
+def test_attach_sends_ctrl_o_when_open_bill_not_open(monkeypatch) -> None:
+    """If Open Bill isn't open yet, attach should send Ctrl+O to the main
+    window (the app's own accelerator for opening it), then keep polling
+    for it to render."""
 
-    window = SimpleNamespace(element_info=SimpleNamespace(process_id=1234))
-    toolbar = SimpleNamespace(element_info=SimpleNamespace(automation_id="Toolbar1"))
-    clicks = {"set_focus": 0, "click_input": 0}
-    button = SimpleNamespace(
-        element_info=SimpleNamespace(automation_id="_Toolbar1_Button2"),
-        set_focus=lambda: clicks.__setitem__("set_focus", clicks["set_focus"] + 1),
-        click_input=lambda: clicks.__setitem__(
-            "click_input", clicks["click_input"] + 1
+    calls = {"set_focus": 0, "type_keys": []}
+    window = SimpleNamespace(
+        element_info=SimpleNamespace(process_id=1234),
+        set_focus=lambda: calls.__setitem__(
+            "set_focus", calls["set_focus"] + 1
         ),
+        type_keys=lambda keys: calls["type_keys"].append(keys),
     )
-
-    def fake_find_direct_uia_control(_backend, parent, automation_id):
-        if parent is window and automation_id == "Toolbar1":
-            return toolbar
-        if parent is toolbar and automation_id == "_Toolbar1_Button2":
-            return button
-        return None
 
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_smartadvisor_window",
@@ -192,10 +182,6 @@ def test_attach_clicks_open_bill_launch_button_when_not_open(
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_open_bill_frame",
         lambda _backend, _window, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        "smartadvisor_automation.driver.find_direct_uia_control",
-        fake_find_direct_uia_control,
     )
     driver = SmartAdvisorDriver(poll_interval=0.01)
 
@@ -206,11 +192,12 @@ def test_attach_clicks_open_bill_launch_button_when_not_open(
         captured.value.code
         == "smartadvisor_open_bill_frame_not_accessible"
     )
-    assert clicks == {"set_focus": 1, "click_input": 1}
+    assert calls["set_focus"] == 1
+    assert calls["type_keys"] == ["^o"]
 
     launch_steps = [
         step
         for step in captured.value.diagnostics["steps"]
         if step["stage"] == "open_bill_launch"
     ]
-    assert [step["outcome"] for step in launch_steps] == ["clicked"]
+    assert [step["outcome"] for step in launch_steps] == ["shortcut_sent"]
