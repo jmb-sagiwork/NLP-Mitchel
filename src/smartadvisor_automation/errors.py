@@ -9,10 +9,12 @@ class AutomationError(RuntimeError):
         code: str,
         *,
         step: str | None = None,
+        diagnostics: dict[str, object] | None = None,
     ) -> None:
         super().__init__(code)
         self.code = code
         self.step = step
+        self.diagnostics = diagnostics
 
 
 class WorkflowCancelled(RuntimeError):

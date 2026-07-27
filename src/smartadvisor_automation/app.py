@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 import queue
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
 
@@ -232,7 +235,7 @@ class AutomationApp:
             self.events.put(("cancelled", None))
         except AutomationError as exc:
             self.events.put(
-                ("automation_error", (exc.code, exc.step))
+                ("automation_error", (exc.code, exc.step, exc.diagnostics))
             )
         except Exception as exc:
             self.events.put(("unexpected_error", type(exc).__name__))
@@ -281,8 +284,8 @@ class AutomationApp:
                 self._set_running(False)
                 self.status.set("Workflow cancelled safely.")
             elif event_name == "automation_error":
-                code, step = payload
-                self._automation_failed(code, step)
+                code, step, diagnostics = payload
+                self._automation_failed(code, step, diagnostics)
             elif event_name == "unexpected_error":
                 self._unexpected_failed(str(payload))
             elif event_name == "validation_complete":
@@ -299,20 +302,50 @@ class AutomationApp:
         self.status.set("Workflow complete.")
 
     def _automation_failed(
-        self, code: str, step: str | None
+        self,
+        code: str,
+        step: str | None,
+        diagnostics: dict[str, object] | None,
     ) -> None:
         self._set_running(False)
         location = f" at step {step}" if step else ""
         self.status.set(f"Workflow stopped safely{location}: {code}")
+
+        trace_path = (
+            self._save_diagnostics(diagnostics) if diagnostics else None
+        )
+        trace_line = (
+            f"\n\nDiagnostic trace saved to:\n{trace_path}"
+            if trace_path is not None
+            else ""
+        )
         messagebox.showerror(
             "Automation stopped",
             (
                 f"The workflow stopped safely{location}.\n\n"
                 f"Reason: {code}\n\n"
                 "No input or extracted values were written to logs."
+                f"{trace_line}"
             ),
             parent=self.root,
         )
+
+    @staticmethod
+    def _save_diagnostics(diagnostics: dict[str, object]) -> Path | None:
+        """Write the redacted attach trace next to the executable's data dir."""
+
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        directory = Path(base) / "SmartAdvisorAutomation" / "diagnostics"
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / "latest-attach-trace.json"
+            path.write_text(
+                json.dumps(diagnostics, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            return None
+        return path
 
     def _unexpected_failed(self, error_code: str) -> None:
         self._set_running(False)

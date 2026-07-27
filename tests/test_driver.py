@@ -10,7 +10,7 @@ from smartadvisor_automation.selectors import CONTROLS_BY_STEP
 def test_attach_reports_window_not_found(monkeypatch) -> None:
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_smartadvisor_window",
-        lambda _backend: None,
+        lambda _backend, **_kwargs: None,
     )
     driver = SmartAdvisorDriver()
 
@@ -18,6 +18,7 @@ def test_attach_reports_window_not_found(monkeypatch) -> None:
         driver.attach(CONTROLS_BY_STEP["1"])
 
     assert captured.value.code == "smartadvisor_window_not_found"
+    assert captured.value.diagnostics is not None
 
 
 def test_attach_reports_open_bill_frame_not_accessible(monkeypatch) -> None:
@@ -26,11 +27,11 @@ def test_attach_reports_open_bill_frame_not_accessible(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_smartadvisor_window",
-        lambda _backend: window,
+        lambda _backend, **_kwargs: window,
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_open_bill_frame",
-        lambda _backend, _window: None,
+        lambda _backend, _window, **_kwargs: None,
     )
     driver = SmartAdvisorDriver()
 
@@ -41,6 +42,7 @@ def test_attach_reports_open_bill_frame_not_accessible(monkeypatch) -> None:
         captured.value.code
         == "smartadvisor_open_bill_frame_not_accessible"
     )
+    assert captured.value.diagnostics is not None
 
 
 def test_attach_reports_inaccessible_controls(monkeypatch) -> None:
@@ -49,11 +51,11 @@ def test_attach_reports_inaccessible_controls(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_smartadvisor_window",
-        lambda _backend: window,
+        lambda _backend, **_kwargs: window,
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_open_bill_frame",
-        lambda _backend, _window: SimpleNamespace(),
+        lambda _backend, _window, **_kwargs: SimpleNamespace(),
     )
     driver = SmartAdvisorDriver()
 
@@ -85,11 +87,11 @@ def test_attach_resolves_landmark_only_inside_open_bill_frame(
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_smartadvisor_window",
-        lambda _backend: window,
+        lambda _backend, **_kwargs: window,
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_open_bill_frame",
-        lambda _backend, _window: frame,
+        lambda _backend, _window, **_kwargs: frame,
     )
     monkeypatch.setattr(
         "smartadvisor_automation.driver.find_direct_uia_control",

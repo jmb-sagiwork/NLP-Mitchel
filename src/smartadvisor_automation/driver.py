@@ -4,6 +4,7 @@ import re
 import time
 from typing import Any
 
+from smartadvisor_automation.diagnostics import DiagnosticTrace
 from smartadvisor_automation.errors import AutomationError
 from smartadvisor_automation.models import ControlSpec
 from smartadvisor_automation.probe import (
@@ -34,13 +35,20 @@ class SmartAdvisorDriver:
     def attach(self, landmark: ControlSpec) -> str:
         """Handshake through Open Bill/Frame1 using the first viable backend."""
 
+        trace = DiagnosticTrace()
         saw_smartadvisor_window = False
         saw_open_bill_frame = False
 
         for backend in SUPPORTED_BACKENDS:
             try:
-                window = find_smartadvisor_window(backend)
-            except Exception:
+                window = find_smartadvisor_window(backend, trace=trace)
+            except Exception as exc:
+                trace.record(
+                    "main_window_lookup",
+                    backend,
+                    "raised",
+                    exception=type(exc).__name__,
+                )
                 continue
             if window is None:
                 continue
@@ -48,11 +56,22 @@ class SmartAdvisorDriver:
 
             process_id = getattr(window.element_info, "process_id", None)
             if process_id is None:
+                trace.record(
+                    "main_window_lookup", backend, "no_process_id"
+                )
                 continue
 
             try:
-                landmark_scope = find_open_bill_frame(backend, window)
-            except Exception:
+                landmark_scope = find_open_bill_frame(
+                    backend, window, trace=trace
+                )
+            except Exception as exc:
+                trace.record(
+                    "open_bill_frame_lookup",
+                    backend,
+                    "raised",
+                    exception=type(exc).__name__,
+                )
                 continue
             if landmark_scope is None:
                 continue
@@ -72,7 +91,13 @@ class SmartAdvisorDriver:
             self._landmark_automation_id = landmark.automation_id
             try:
                 self.resolve(landmark, timeout=2.0)
-            except AutomationError:
+            except AutomationError as exc:
+                trace.record(
+                    "landmark_resolve",
+                    backend,
+                    "failed",
+                    error_code=exc.code,
+                )
                 self.backend = None
                 self.process_id = None
                 self._landmark_scope = None
@@ -86,7 +111,9 @@ class SmartAdvisorDriver:
             code = "smartadvisor_open_bill_frame_not_accessible"
         else:
             code = "smartadvisor_controls_not_accessible"
-        raise AutomationError(code, step=landmark.step)
+        raise AutomationError(
+            code, step=landmark.step, diagnostics=trace.to_report()
+        )
 
     def _windows_for_process(self) -> list[Any]:
         if self.backend is None or self.process_id is None:

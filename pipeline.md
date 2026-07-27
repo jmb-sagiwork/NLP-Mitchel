@@ -283,7 +283,7 @@ This section supersedes conflicting assumptions in the original plan.
 - Packager: PyInstaller one-file executable.
 - Required build architecture: x86 (`PE machine 0x014C`).
 - Current workflow executable:
-  `release/SmartAdvisorAutomation-0.2.4-x86.exe`.
+  `release/SmartAdvisorAutomation-0.2.5-x86.exe`.
 - Current diagnostic executable:
   `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
 - Current automated test count: 37 passing.
@@ -781,10 +781,11 @@ https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/Sm
 | `tests/test_probe.py` | Main-window and parent-identity regression tests |
 | `tests/test_object_extractor.py` | Tree traversal, truncation, parent, and redaction tests |
 | `tests/test_report_privacy.py` | Report schema privacy gates |
+| `src/smartadvisor_automation/diagnostics.py` | Redacted step-by-step attach trace collector |
 
 ## 17. Current Handoff State
 
-As of July 25, 2026:
+As of July 27, 2026:
 
 - The exact SmartAdvisor main window is detected.
 - The application and extractor are both genuine x86 executables.
@@ -795,10 +796,50 @@ As of July 25, 2026:
 - UIA direct-child traversal completed without errors or truncation.
 - Version 0.2.4 implements the exact process-root/direct-child hierarchy and
   verifies `cboClient` before attachment succeeds.
-- The next action is a user validation run with the 0.2.4 x86 executable and
-  Open Bill visible.
-- The next user validation is to run the updated automation with `Open Bill`
-  visible. If the landmark still fails, capture a new report with `Frame1` and
-  `cboClient` visibly present to prove their backend/root/parent path.
 - Do not reintroduce x64 builds, hard-coded HWNDs/process IDs, raw field
   logging, or coordinate-first automation.
+
+### 17.1 0.2.4 was never published, and still failed once it was
+
+The 0.2.4 source and its Actions build (run `30129733119`) were complete on
+July 24, but the built executable was only ever an Actions artifact — it was
+never committed to `release/`. Every user run through July 27 was still the
+pre-fix 0.2.3 build, so `smartadvisor_open_bill_frame_not_accessible`
+recurring was expected and uninformative.
+
+Commit `cd672fb` published the actual 0.2.4 artifact to
+`release/SmartAdvisorAutomation-0.2.4-x86.exe`. The user then ran that
+genuine 0.2.4 build with `Open Bill` open and received the **same**
+`smartadvisor_open_bill_frame_not_accessible` error. This is unexplained by
+the existing evidence: the July 24 object report proves the exact
+`frmBillOpen` → `Frame1` → `cboClient` hierarchy that `_strict_uia_open_bill_frame`
+is written to match. Re-analyzing that same static report cannot explain a
+live failure of code the report itself validates — the report is stale
+evidence, and guessing at another selector or fallback without new data
+would repeat the same mistake.
+
+### 17.2 Attach diagnostic trace added (0.2.5)
+
+Rather than iterate on more static object-report captures, version 0.2.5 adds
+a live, privacy-safe trace of the actual attach handshake:
+
+- `smartadvisor_automation/diagnostics.py` defines `DiagnosticTrace`, a
+  redacted step/backend/outcome log (match counts, exception class names —
+  never titles, control text, or field values).
+- `probe.py`'s resolution helpers (`find_smartadvisor_window`,
+  `find_open_bill_frame`, `_strict_uia_open_bill_frame`,
+  `_find_open_bill_process_window`, `_find_open_bill_in_main`,
+  `_find_frame_in_open_bill`) each accept an optional `trace` and record
+  exactly which strategy ran, what it matched or why it didn't, and any
+  exception type raised.
+- `driver.attach()` builds one `DiagnosticTrace` per attach attempt and
+  attaches it to the raised `AutomationError` as `.diagnostics`.
+- `app.py` writes that trace to
+  `%LOCALAPPDATA%\SmartAdvisorAutomation\diagnostics\latest-attach-trace.json`
+  on failure and shows the path in the error dialog.
+
+**Next action:** run 0.2.5 with `Open Bill` open, reproduce the failure, and
+send back `latest-attach-trace.json`. It will show which of the four
+resolution strategies ran, the real match counts at each stage, and any
+exception type — the first real evidence from a live failing attach, as
+opposed to a three-day-old static snapshot.

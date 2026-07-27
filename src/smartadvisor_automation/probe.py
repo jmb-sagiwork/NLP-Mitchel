@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Iterable
 
+from smartadvisor_automation.diagnostics import DiagnosticTrace
 from smartadvisor_automation.models import ControlSpec, ProbeResult
 from smartadvisor_automation.selectors import (
     NO_BILL_ON_FILE_CONTROLS,
@@ -235,12 +236,23 @@ def _element_name(element: Any) -> str:
     return name or str(getattr(info, "name", "") or "")
 
 
-def _find_frame_in_open_bill(open_bill: Any) -> Any | None:
+def _find_frame_in_open_bill(
+    open_bill: Any,
+    *,
+    trace: DiagnosticTrace | None = None,
+) -> Any | None:
     """Use the narrow Open Bill subtree if native frame lookup is unavailable."""
 
     try:
         descendants = list(open_bill.descendants())
-    except Exception:
+    except Exception as exc:
+        if trace:
+            trace.record(
+                "descendant_frame_search",
+                "any",
+                "descendant_scan_failed",
+                exception=type(exc).__name__,
+            )
         return None
 
     for element in descendants:
@@ -250,11 +262,26 @@ def _find_frame_in_open_bill(open_bill: Any) -> Any | None:
             str(getattr(info, "automation_id", "") or ""),
             str(getattr(info, "class_name", "") or ""),
         ):
+            if trace:
+                trace.record(
+                    "descendant_frame_search", "any", "resolved"
+                )
             return element
+    if trace:
+        trace.record(
+            "descendant_frame_search",
+            "any",
+            "not_found",
+            descendant_count=len(descendants),
+        )
     return None
 
 
-def _find_open_bill_in_main(main_window: Any) -> Any | None:
+def _find_open_bill_in_main(
+    main_window: Any,
+    *,
+    trace: DiagnosticTrace | None = None,
+) -> Any | None:
     """Fall back to the supplied UIA ancestry when HWND nesting differs."""
 
     try:
@@ -262,7 +289,14 @@ def _find_open_bill_in_main(main_window: Any) -> Any | None:
     except Exception:
         try:
             descendants = list(main_window.descendants())
-        except Exception:
+        except Exception as exc:
+            if trace:
+                trace.record(
+                    "open_bill_in_main_descendants",
+                    "uia",
+                    "descendant_scan_failed",
+                    exception=type(exc).__name__,
+                )
             return None
 
     for element in descendants:
@@ -274,18 +308,34 @@ def _find_open_bill_in_main(main_window: Any) -> Any | None:
                 SMARTADVISOR_WINDOW_CLASS_PREFIX
             )
         ):
+            if trace:
+                trace.record(
+                    "open_bill_in_main_descendants", "uia", "resolved"
+                )
             return element
+    if trace:
+        trace.record(
+            "open_bill_in_main_descendants",
+            "uia",
+            "not_found",
+            descendant_count=len(descendants),
+        )
     return None
 
 
 def _find_open_bill_process_window(
     desktop: Any,
     main_window: Any,
+    *,
+    trace: DiagnosticTrace | None = None,
 ) -> Any | None:
     """Find a separate Open Bill top-level window owned by SmartAdvisor."""
 
+    stage = "process_window_title_search"
     process_id = getattr(main_window.element_info, "process_id", None)
     if process_id is None:
+        if trace:
+            trace.record(stage, "any", "no_process_id")
         return None
 
     try:
@@ -296,7 +346,14 @@ def _find_open_bill_process_window(
                 enabled_only=False,
             )
         )
-    except Exception:
+    except Exception as exc:
+        if trace:
+            trace.record(
+                stage,
+                "any",
+                "window_enumeration_failed",
+                exception=type(exc).__name__,
+            )
         return None
 
     matches = []
@@ -312,14 +369,39 @@ def _find_open_bill_process_window(
             matches.append(window)
 
     if len(matches) == 1:
+        if trace:
+            trace.record(
+                stage,
+                "any",
+                "resolved",
+                process_window_count=len(windows),
+            )
         return matches[0]
 
     actionable = [
         window
         for window in matches
-        if _find_frame_in_open_bill(window) is not None
+        if _find_frame_in_open_bill(window, trace=trace) is not None
     ]
-    return actionable[0] if len(actionable) == 1 else None
+    if len(actionable) == 1:
+        if trace:
+            trace.record(
+                stage,
+                "any",
+                "resolved_by_actionable_frame",
+                title_match_count=len(matches),
+            )
+        return actionable[0]
+
+    if trace:
+        trace.record(
+            stage,
+            "any",
+            "title_not_uniquely_matched",
+            process_window_count=len(windows),
+            title_match_count=len(matches),
+        )
+    return None
 
 
 def _direct_element_children(element_info: Any) -> list[Any]:
@@ -334,11 +416,16 @@ def _direct_element_children(element_info: Any) -> list[Any]:
 def _strict_uia_open_bill_frame(
     desktop: Any,
     main_window: Any,
+    *,
+    trace: DiagnosticTrace | None = None,
 ) -> Any | None:
     """Resolve the exact hierarchy proven by the object extractor."""
 
+    stage = "strict_uia_hierarchy"
     process_id = getattr(main_window.element_info, "process_id", None)
     if process_id is None:
+        if trace:
+            trace.record(stage, "uia", "no_process_id")
         return None
 
     try:
@@ -349,7 +436,14 @@ def _strict_uia_open_bill_frame(
                 enabled_only=False,
             )
         )
-    except Exception:
+    except Exception as exc:
+        if trace:
+            trace.record(
+                stage,
+                "uia",
+                "window_enumeration_failed",
+                exception=type(exc).__name__,
+            )
         return None
 
     open_bill_matches = []
@@ -368,6 +462,14 @@ def _strict_uia_open_bill_frame(
             open_bill_matches.append(window)
 
     if len(open_bill_matches) != 1:
+        if trace:
+            trace.record(
+                stage,
+                "uia",
+                "open_bill_not_uniquely_matched",
+                process_window_count=len(process_windows),
+                open_bill_match_count=len(open_bill_matches),
+            )
         return None
 
     frame_matches = []
@@ -387,12 +489,23 @@ def _strict_uia_open_bill_frame(
             frame_matches.append(info)
 
     if len(frame_matches) != 1:
+        if trace:
+            trace.record(
+                stage,
+                "uia",
+                "frame_not_uniquely_matched",
+                direct_child_count=len(
+                    _direct_element_children(open_bill_matches[0].element_info)
+                ),
+                frame_match_count=len(frame_matches),
+            )
         return None
     frame_info = frame_matches[0]
 
+    frame_children = _direct_element_children(frame_info)
     client_matches = [
         info
-        for info in _direct_element_children(frame_info)
+        for info in frame_children
         if (
             str(getattr(info, "automation_id", "") or "")
             == OPEN_BILL_CLIENT_AUTOMATION_ID
@@ -404,17 +517,38 @@ def _strict_uia_open_bill_frame(
         )
     ]
     if len(client_matches) != 1:
+        if trace:
+            trace.record(
+                stage,
+                "uia",
+                "client_not_uniquely_matched",
+                frame_direct_child_count=len(frame_children),
+                client_match_count=len(client_matches),
+            )
         return None
 
     frame_handle = _safe_int_handle(
         getattr(frame_info, "handle", None)
     )
     if frame_handle is None:
+        if trace:
+            trace.record(stage, "uia", "frame_handle_missing")
         return None
     try:
-        return desktop.window(handle=frame_handle)
-    except Exception:
+        wrapped = desktop.window(handle=frame_handle)
+    except Exception as exc:
+        if trace:
+            trace.record(
+                stage,
+                "uia",
+                "frame_handle_wrap_failed",
+                exception=type(exc).__name__,
+            )
         return None
+
+    if trace:
+        trace.record(stage, "uia", "resolved")
+    return wrapped
 
 
 def _safe_int_handle(value: object) -> int | None:
@@ -464,7 +598,12 @@ def find_direct_uia_control(
         return None
 
 
-def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
+def find_open_bill_frame(
+    backend: str,
+    main_window: Any,
+    *,
+    trace: DiagnosticTrace | None = None,
+) -> Any | None:
     """Handshake through Main System -> Open Bill -> Frame1."""
 
     from pywinauto import Desktop
@@ -475,11 +614,14 @@ def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
         strict_frame = _strict_uia_open_bill_frame(
             desktop,
             main_window,
+            trace=trace,
         )
         if strict_frame is not None:
             return strict_frame
 
-    open_bill = _find_open_bill_process_window(desktop, main_window)
+    open_bill = _find_open_bill_process_window(
+        desktop, main_window, trace=trace
+    )
 
     if open_bill is None and main_handle is not None:
         open_bill_handles = _native_named_descendants(
@@ -487,11 +629,18 @@ def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
             OPEN_BILL_WINDOW_TITLE,
         )
         open_bill_handle = _preferred_native_handle(open_bill_handles)
+        if trace:
+            trace.record(
+                "native_child_search",
+                backend,
+                "resolved" if open_bill_handle is not None else "not_found",
+                candidate_count=len(open_bill_handles),
+            )
         if open_bill_handle is not None:
             open_bill = desktop.window(handle=open_bill_handle)
 
     if open_bill is None:
-        open_bill = _find_open_bill_in_main(main_window)
+        open_bill = _find_open_bill_in_main(main_window, trace=trace)
     if open_bill is None:
         return None
 
@@ -510,9 +659,20 @@ def find_open_bill_frame(backend: str, main_window: Any) -> Any | None:
                 str(getattr(info, "automation_id", "") or ""),
                 str(getattr(info, "class_name", "") or ""),
             ):
+                if trace:
+                    trace.record(
+                        "native_frame_search", backend, "resolved"
+                    )
                 return frame
+        if trace:
+            trace.record(
+                "native_frame_search",
+                backend,
+                "not_found",
+                candidate_count=len(frame_handles),
+            )
 
-    return _find_frame_in_open_bill(open_bill)
+    return _find_frame_in_open_bill(open_bill, trace=trace)
 
 
 def _element_identity(window: Any) -> tuple[str, str]:
@@ -530,27 +690,57 @@ def _element_identity(window: Any) -> tuple[str, str]:
     return title, class_name
 
 
-def find_smartadvisor_window(backend: str) -> Any | None:
+def find_smartadvisor_window(
+    backend: str,
+    *,
+    trace: DiagnosticTrace | None = None,
+) -> Any | None:
     """Find SmartAdvisor by exact native HWND, with a strict UIA fallback."""
 
     from pywinauto import Desktop
 
     desktop = Desktop(backend=backend)
 
-    native_handle = _preferred_native_handle(
-        _native_smartadvisor_handles()
-    )
+    native_handles = _native_smartadvisor_handles()
+    native_handle = _preferred_native_handle(native_handles)
     if native_handle is not None:
         try:
-            return desktop.window(handle=native_handle)
-        except Exception:
-            pass
+            window = desktop.window(handle=native_handle)
+        except Exception as exc:
+            if trace:
+                trace.record(
+                    "main_window_native_handle",
+                    backend,
+                    "wrap_failed",
+                    exception=type(exc).__name__,
+                    candidate_count=len(native_handles),
+                )
+        else:
+            if trace:
+                trace.record(
+                    "main_window_native_handle",
+                    backend,
+                    "resolved",
+                    candidate_count=len(native_handles),
+                )
+            return window
 
     for window in desktop.windows():
         title, class_name = _element_identity(window)
         if is_smartadvisor_window_identity(title, class_name):
+            if trace:
+                trace.record(
+                    "main_window_uia_fallback", backend, "resolved"
+                )
             return window
 
+    if trace:
+        trace.record(
+            "main_window_uia_fallback",
+            backend,
+            "not_found",
+            native_candidate_count=len(native_handles),
+        )
     return None
 
 
@@ -610,7 +800,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.2.4",
+        "utility_version": "0.2.5",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {
