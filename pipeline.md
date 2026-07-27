@@ -283,7 +283,7 @@ This section supersedes conflicting assumptions in the original plan.
 - Packager: PyInstaller one-file executable.
 - Required build architecture: x86 (`PE machine 0x014C`).
 - Current workflow executable:
-  `release/SmartAdvisorAutomation-0.2.5-x86.exe`.
+  `release/SmartAdvisorAutomation-0.2.6-x86.exe`.
 - Current diagnostic executable:
   `release/SmartAdvisorObjectExtractor-0.1.0-x86.exe`.
 - Current automated test count: 37 passing.
@@ -843,3 +843,60 @@ send back `latest-attach-trace.json`. It will show which of the four
 resolution strategies ran, the real match counts at each stage, and any
 exception type — the first real evidence from a live failing attach, as
 opposed to a three-day-old static snapshot.
+
+### 17.3 First live trace: Open Bill was not enumerable at attach time (0.2.6)
+
+The user ran 0.2.5 and returned a real attach trace. It proved, for the
+first time, what happens during an actual failing attach rather than a
+manually-triggered static capture:
+
+- `main_window_native_handle` resolved on both `uia` and `win32` (the
+  SmartAdvisor main window was found correctly both times).
+- `strict_uia_hierarchy` and `process_window_title_search` both reported
+  `process_window_count: 1` — the per-process top-level window enumeration
+  (`Desktop(backend).windows(process=pid, visible_only=True,
+  enabled_only=False)`) saw only the main window. Open Bill was not in the
+  list at all, on either backend.
+- `native_child_search` and `open_bill_in_main_descendants` both returned
+  zero candidates.
+
+This is a different failure shape than anything in the July 24 report,
+which found `process_window_count: 12` with Open Bill present. The object
+extractor's own enumeration (`native_process_windows` in
+`object_extractor.py`) uses raw `win32gui.EnumWindows` with no visibility
+filter and no dependency on timing relative to a workflow action. The
+production attach path, by contrast, calls `find_open_bill_frame`
+immediately after the Search click with exactly one enumeration pass per
+backend and no retry — so a window that takes even a brief moment to
+finish registering with the local window manager (plausible under Citrix
+seamless-window delivery) is missed entirely, permanently, for that attach
+call.
+
+Every existing resolution strategy proved correct against real report data;
+none of them were rewritten. The gap was structural: `resolve()` already
+polls a target control until a timeout using `time.monotonic()` and
+`poll_interval`, but `attach()` — the Main System → Open Bill → Frame1
+handshake — made exactly one pass and gave up immediately.
+
+Version 0.2.6:
+
+- adds `SmartAdvisorDriver.attach_timeout` (default 6.0s) and an optional
+  `attach(landmark, *, timeout=...)` override;
+- wraps the existing per-backend resolution loop in the same
+  deadline/poll-interval pattern `resolve()` already uses, retrying the full
+  Main System → Open Bill → Frame1 handshake until Open Bill becomes
+  enumerable or the deadline elapses;
+- records an `attach_attempt`/`retry` marker in the diagnostic trace on each
+  retry pass, so a saved trace shows whether/when resolution succeeded on a
+  later attempt;
+- adds a regression test
+  (`test_attach_retries_while_open_bill_still_renders`) simulating Open Bill
+  becoming resolvable only on the third attempt.
+
+**Next action:** run 0.2.6. If Open Bill was genuinely just slow to render,
+attach should now succeed without any other change. If it still fails,
+`latest-attach-trace.json` will show repeated `attach_attempt` markers with
+`process_window_count` still at 1 through the full timeout window — proof
+the process-window enumeration itself cannot see Open Bill under this
+Citrix session regardless of timing, which would point at a `visible_only`
+or cross-process visibility boundary instead.

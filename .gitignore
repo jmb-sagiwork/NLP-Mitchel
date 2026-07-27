@@ -12,7 +12,7 @@ SmartAdvisor-object-report*.json
 
 # Commit only the approved standalone release executable.
 release/*
-!release/SmartAdvisorAutomation-0.2.5-x86.exe
+!release/SmartAdvisorAutomation-0.2.6-x86.exe
 !release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
 
 # Local agent and generated analysis data

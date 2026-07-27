@@ -24,86 +24,114 @@ class SmartAdvisorDriver:
         *,
         timeout: float = 12.0,
         poll_interval: float = 0.25,
+        attach_timeout: float = 6.0,
     ) -> None:
         self.timeout = timeout
         self.poll_interval = poll_interval
+        self.attach_timeout = attach_timeout
         self.backend: str | None = None
         self.process_id: int | None = None
         self._landmark_scope: Any | None = None
         self._landmark_automation_id: str | None = None
 
-    def attach(self, landmark: ControlSpec) -> str:
-        """Handshake through Open Bill/Frame1 using the first viable backend."""
+    def attach(
+        self,
+        landmark: ControlSpec,
+        *,
+        timeout: float | None = None,
+    ) -> str:
+        """Handshake through Open Bill/Frame1, retrying while it renders.
+
+        Open Bill can take a moment to become enumerable (Citrix window
+        registration lag) after the user opens it, so this polls the same
+        way `resolve()` does rather than giving up after one pass.
+        """
 
         trace = DiagnosticTrace()
+        deadline = time.monotonic() + (
+            self.attach_timeout if timeout is None else timeout
+        )
         saw_smartadvisor_window = False
         saw_open_bill_frame = False
+        attempt = 0
 
-        for backend in SUPPORTED_BACKENDS:
-            try:
-                window = find_smartadvisor_window(backend, trace=trace)
-            except Exception as exc:
-                trace.record(
-                    "main_window_lookup",
+        while True:
+            attempt += 1
+            if attempt > 1:
+                trace.record("attach_attempt", "", "retry", attempt=attempt)
+
+            for backend in SUPPORTED_BACKENDS:
+                try:
+                    window = find_smartadvisor_window(backend, trace=trace)
+                except Exception as exc:
+                    trace.record(
+                        "main_window_lookup",
+                        backend,
+                        "raised",
+                        exception=type(exc).__name__,
+                    )
+                    continue
+                if window is None:
+                    continue
+                saw_smartadvisor_window = True
+
+                process_id = getattr(
+                    window.element_info, "process_id", None
+                )
+                if process_id is None:
+                    trace.record(
+                        "main_window_lookup", backend, "no_process_id"
+                    )
+                    continue
+
+                try:
+                    landmark_scope = find_open_bill_frame(
+                        backend, window, trace=trace
+                    )
+                except Exception as exc:
+                    trace.record(
+                        "open_bill_frame_lookup",
+                        backend,
+                        "raised",
+                        exception=type(exc).__name__,
+                    )
+                    continue
+                if landmark_scope is None:
+                    continue
+                saw_open_bill_frame = True
+
+                direct_landmark = find_direct_uia_control(
                     backend,
-                    "raised",
-                    exception=type(exc).__name__,
+                    landmark_scope,
+                    landmark.automation_id,
                 )
-                continue
-            if window is None:
-                continue
-            saw_smartadvisor_window = True
+                if direct_landmark is not None:
+                    landmark_scope = direct_landmark
 
-            process_id = getattr(window.element_info, "process_id", None)
-            if process_id is None:
-                trace.record(
-                    "main_window_lookup", backend, "no_process_id"
-                )
-                continue
+                self.backend = backend
+                self.process_id = int(process_id)
+                self._landmark_scope = landmark_scope
+                self._landmark_automation_id = landmark.automation_id
+                try:
+                    self.resolve(landmark, timeout=2.0)
+                except AutomationError as exc:
+                    trace.record(
+                        "landmark_resolve",
+                        backend,
+                        "failed",
+                        error_code=exc.code,
+                    )
+                    self.backend = None
+                    self.process_id = None
+                    self._landmark_scope = None
+                    self._landmark_automation_id = None
+                    continue
+                return backend
 
-            try:
-                landmark_scope = find_open_bill_frame(
-                    backend, window, trace=trace
-                )
-            except Exception as exc:
-                trace.record(
-                    "open_bill_frame_lookup",
-                    backend,
-                    "raised",
-                    exception=type(exc).__name__,
-                )
-                continue
-            if landmark_scope is None:
-                continue
-            saw_open_bill_frame = True
-
-            direct_landmark = find_direct_uia_control(
-                backend,
-                landmark_scope,
-                landmark.automation_id,
-            )
-            if direct_landmark is not None:
-                landmark_scope = direct_landmark
-
-            self.backend = backend
-            self.process_id = int(process_id)
-            self._landmark_scope = landmark_scope
-            self._landmark_automation_id = landmark.automation_id
-            try:
-                self.resolve(landmark, timeout=2.0)
-            except AutomationError as exc:
-                trace.record(
-                    "landmark_resolve",
-                    backend,
-                    "failed",
-                    error_code=exc.code,
-                )
-                self.backend = None
-                self.process_id = None
-                self._landmark_scope = None
-                self._landmark_automation_id = None
-                continue
-            return backend
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(self.poll_interval, remaining))
 
         if not saw_smartadvisor_window:
             code = "smartadvisor_window_not_found"
