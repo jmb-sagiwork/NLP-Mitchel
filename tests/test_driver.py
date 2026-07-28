@@ -237,3 +237,88 @@ def test_invoke_uses_uia_invoke_pattern(monkeypatch) -> None:
     driver.invoke(CONTROLS_BY_STEP["1"])
 
     assert calls == ["invoke"]
+
+
+def test_click_with_invoke_fallback_stops_after_confirmed_click(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    element = SimpleNamespace(
+        set_focus=lambda: calls.append("focus"),
+        click_input=lambda: calls.append("click"),
+        iface_invoke=SimpleNamespace(
+            Invoke=lambda: calls.append("invoke")
+        ),
+    )
+    driver = SmartAdvisorDriver()
+
+    def resolve(spec, *, timeout=None):
+        if spec.step == "1":
+            return element
+        calls.append(f"confirm:{timeout}")
+        return SimpleNamespace()
+
+    monkeypatch.setattr(driver, "resolve", resolve)
+
+    driver.click_with_invoke_fallback(
+        CONTROLS_BY_STEP["1"],
+        CONTROLS_BY_STEP["2"],
+    )
+
+    assert calls == ["focus", "click", "confirm:2.0"]
+
+
+def test_click_with_invoke_fallback_invokes_after_no_result(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    element = SimpleNamespace(
+        set_focus=lambda: calls.append("focus"),
+        click_input=lambda: calls.append("click"),
+        iface_invoke=SimpleNamespace(
+            Invoke=lambda: calls.append("invoke")
+        ),
+    )
+    driver = SmartAdvisorDriver()
+
+    def resolve(spec, *, timeout=None):
+        if spec.step == "1":
+            return element
+        calls.append(f"confirm:{timeout}")
+        raise AutomationError("selector_not_found", step=spec.step)
+
+    monkeypatch.setattr(driver, "resolve", resolve)
+
+    driver.click_with_invoke_fallback(
+        CONTROLS_BY_STEP["1"],
+        CONTROLS_BY_STEP["2"],
+    )
+
+    assert calls == ["focus", "click", "confirm:2.0", "invoke"]
+
+
+def test_click_with_invoke_fallback_invokes_after_click_error(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fail_click():
+        calls.append("click")
+        raise RuntimeError("mouse input failed")
+
+    element = SimpleNamespace(
+        set_focus=lambda: calls.append("focus"),
+        click_input=fail_click,
+        iface_invoke=SimpleNamespace(
+            Invoke=lambda: calls.append("invoke")
+        ),
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.click_with_invoke_fallback(
+        CONTROLS_BY_STEP["1"],
+        CONTROLS_BY_STEP["2"],
+    )
+
+    assert calls == ["focus", "click", "invoke"]

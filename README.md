@@ -41,10 +41,11 @@ walks direct UIA children to `AutomationId=Frame1` and verifies the direct
 `AutomationId=_cmdSearch_1` Button before attaching. HWND values remain
 dynamic.
 
-When Open Bill is not already visible, version 0.3.2 focuses the exact
+When Open Bill is not already visible, version 0.3.3 focuses the exact
 SmartAdvisor main window and sends `Ctrl+O` once. It then waits for
-`frmBillOpen` → `Frame1` → `_cmdSearch_1` and invokes the button through its
-confirmed UIA InvokePattern without moving the mouse.
+`frmBillOpen` → `Frame1` → `_cmdSearch_1`, clicks the button with real mouse
+input, and confirms that the next search control appears. UIA InvokePattern is
+used only if the click fails or produces no result.
 
 ## Object extractor
 
@@ -133,8 +134,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.3.2-x86.zip
-release\SmartAdvisorAutomation-0.3.2-x86.exe
+dist\SmartAdvisorAutomation-0.3.3-x86.zip
+release\SmartAdvisorAutomation-0.3.3-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 release\SmartAdvisorControlPicker-0.2.0-x86.exe
 release\SmartAdvisorActionRecorder-0.1.0-x86.exe

@@ -20,8 +20,14 @@ class FakeDriver:
         self.calls.append(("attach", landmark.step))
         return "uia"
 
-    def invoke(self, spec) -> None:
-        self.calls.append(("invoke", spec.step))
+    def click_with_invoke_fallback(
+        self,
+        spec,
+        confirmation_spec,
+    ) -> None:
+        self.calls.append(
+            ("click_with_invoke_fallback", spec.step, confirmation_spec.step)
+        )
 
     def click(self, spec) -> None:
         self.calls.append(("click", spec.step))
@@ -47,7 +53,7 @@ def test_workflow_executes_supplied_steps_in_order() -> None:
 
     assert driver.calls == [
         ("attach", "1"),
-        ("invoke", "1"),
+        ("click_with_invoke_fallback", "1", "2"),
         ("clear", "2"),
         ("click", "3"),
         ("input", "4", "CASE-1"),

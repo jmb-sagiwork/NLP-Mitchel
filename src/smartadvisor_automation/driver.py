@@ -287,6 +287,45 @@ class SmartAdvisorDriver:
         except Exception as exc:
             raise AutomationError("invoke_failed", step=spec.step) from exc
 
+    def click_with_invoke_fallback(
+        self,
+        spec: ControlSpec,
+        confirmation_spec: ControlSpec,
+        *,
+        confirmation_timeout: float = 2.0,
+    ) -> None:
+        """Click with real mouse input, then invoke if no result appears."""
+
+        element = self.resolve(spec)
+        try:
+            element.set_focus()
+        except Exception:
+            # click_input() can still activate an unfocused control.
+            pass
+
+        try:
+            element.click_input()
+        except Exception:
+            pass
+        else:
+            try:
+                self.resolve(
+                    confirmation_spec,
+                    timeout=confirmation_timeout,
+                )
+                return
+            except AutomationError:
+                # The click completed but did not expose the expected control.
+                pass
+
+        try:
+            element.iface_invoke.Invoke()
+        except Exception as exc:
+            raise AutomationError(
+                "click_and_invoke_failed",
+                step=spec.step,
+            ) from exc
+
     def clear(self, spec: ControlSpec) -> None:
         element = self.resolve(spec)
         try:

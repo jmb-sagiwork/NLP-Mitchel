@@ -21,7 +21,11 @@ ProgressCallback = Callable[[str, str], None]
 class WorkflowDriver(Protocol):
     def attach(self, landmark: ControlSpec) -> str: ...
 
-    def invoke(self, spec: ControlSpec) -> None: ...
+    def click_with_invoke_fallback(
+        self,
+        spec: ControlSpec,
+        confirmation_spec: ControlSpec,
+    ) -> None: ...
 
     def click(self, spec: ControlSpec) -> None: ...
 
@@ -107,7 +111,10 @@ class NoBillOnFileWorkflow:
         self._run_step(
             "1",
             "Opening search options",
-            lambda: self.driver.invoke(CONTROLS_BY_STEP["1"]),
+            lambda: self.driver.click_with_invoke_fallback(
+                CONTROLS_BY_STEP["1"],
+                CONTROLS_BY_STEP["2"],
+            ),
         )
         self._run_step(
             "2",

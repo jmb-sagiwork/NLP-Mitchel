@@ -19,7 +19,7 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         step="1",
         automation_id=OPEN_BILL_ACTION_AUTOMATION_ID,
         label="Additional search options",
-        action="invoke",
+        action="click_input_then_invoke",
         common_to_all_cases=True,
     ),
     ControlSpec(
