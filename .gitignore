@@ -8,6 +8,7 @@ reports/
 SmartAdvisor*_object_report*.txt
 SmartAdvisor-object-report*.json
 SmartAdvisor-control-report*.json
+SmartAdvisor-action-recording*.json
 *.spec
 *.log
 
@@ -15,7 +16,8 @@ SmartAdvisor-control-report*.json
 release/*
 !release/SmartAdvisorAutomation-0.2.9-x86.exe
 !release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
-!release/SmartAdvisorControlPicker-0.1.0-x86.exe
+!release/SmartAdvisorControlPicker-0.2.0-x86.exe
+!release/SmartAdvisorActionRecorder-0.1.0-x86.exe
 
 # Local agent and generated analysis data
 .tokensave/

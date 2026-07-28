@@ -56,14 +56,46 @@ saved `SmartAdvisor-object-report.json` back for selector diagnosis.
 
 ## Control picker
 
-Use `SmartAdvisorControlPicker-0.1.0-x86.exe` when a control's
+Use `SmartAdvisorControlPicker-0.2.0-x86.exe` when a control's
 `AutomationId` is unknown or a guess turned out wrong. Starting from the
 SmartAdvisor main window, it highlights one child at a time on screen and
 asks: **No** (next sibling), **Yes** (right branch, but a container - dig
 into its children), or **Final** (this exact control - stop here). It never
 clicks, types, or submits anything in SmartAdvisor; it only highlights and
-asks. Save the report and send it back so the real `AutomationId` can
-replace a guess in `selectors.py`.
+asks.
+
+Select **Record a control** once per control you need. Each confirmed
+control is held in the session together with the full ancestor path walked
+to reach it, so three controls produce one `entries` array in a single
+report instead of three separate files. **Save recording** writes them all
+at once; **Discard all** clears the session. A stopped walk keeps whatever
+was already recorded. Send the report back so the real `AutomationId` and
+its parent chain can replace a guess in `selectors.py`.
+
+## Action recorder
+
+Use `SmartAdvisorActionRecorder-0.1.0-x86.exe` to capture a whole workflow
+instead of one control at a time. Select **Start recording**, work through
+SmartAdvisor by hand, select **Stop recording**, then save one JSON file.
+
+Each step records the action (`click`, `input`, `key`), the target's
+`AutomationId`, its ancestor path and owning window, the delay since the
+previous step, and how many visible enabled controls shared that
+`AutomationId` at the time - so a step that would fail the driver's
+exactly-one-match rule is flagged as `[AMBIGUOUS]` before any code is
+written. Steps with no `AutomationId` are flagged `[NO ID]`.
+
+**Typed characters are never captured.** A text entry is recorded only as
+"this control received typing"; the value comes from a run parameter, the
+way `claim_id` and `dos_from` already do. Keyboard shortcuts such as
+`Ctrl+O` and structural keys such as `{TAB}`/`{ENTER}` *are* recorded,
+since they are part of the workflow and carry no data.
+
+The recorder observes input and passes every event straight through - it
+never clicks or types in SmartAdvisor. Note that it installs a low-level
+Windows input hook, which endpoint security tooling may flag on an
+unsigned executable; clear it with whoever owns endpoint policy before
+deploying it into a managed Citrix estate.
 
 ## Run from source
 
@@ -98,7 +130,8 @@ The build creates:
 dist\SmartAdvisorAutomation-0.2.9-x86.zip
 release\SmartAdvisorAutomation-0.2.9-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
-release\SmartAdvisorControlPicker-0.1.0-x86.exe
+release\SmartAdvisorControlPicker-0.2.0-x86.exe
+release\SmartAdvisorActionRecorder-0.1.0-x86.exe
 ```
 
 The ZIP contains the supported one-folder package. The standalone EXE is
