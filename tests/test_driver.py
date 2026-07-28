@@ -103,7 +103,7 @@ def test_attach_resolves_landmark_only_inside_open_bill_frame(
     assert driver.resolve(CONTROLS_BY_STEP["1"], timeout=0.1) is landmark
 
     search_button = SimpleNamespace(
-        element_info=SimpleNamespace(automation_id="394450"),
+        element_info=SimpleNamespace(automation_id="txtClient"),
         is_visible=lambda: True,
         is_enabled=lambda: True,
     )

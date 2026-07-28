@@ -45,8 +45,22 @@ def test_amount_step_extracts_then_clicks() -> None:
 def test_claim_control_uses_bill_search_edit() -> None:
     claim_control = CONTROLS_BY_STEP["4"]
 
-    assert claim_control.automation_id == "197684"
+    assert claim_control.automation_id == "txtClaimID"
     assert claim_control.action == "input"
+
+
+def test_dos_control_uses_bill_search_edit() -> None:
+    dos_control = CONTROLS_BY_STEP["5"]
+
+    assert dos_control.automation_id == "txtDOSFrom"
+    assert dos_control.action == "input"
+
+
+def test_client_control_uses_stable_automation_id() -> None:
+    client_control = CONTROLS_BY_STEP["2"]
+
+    assert client_control.automation_id == "txtClient"
+    assert client_control.action == "clear"
 
 
 def test_selector_definitions_do_not_contain_sample_values() -> None:
