@@ -758,8 +758,8 @@ No selector, coordinate, hard-coded handle, or field-value logging was added.
 Current direct downloads:
 
 ```text
-Automation (0.2.9):
-https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.2.9-x86.exe
+Automation (0.3.0):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.3.0-x86.exe
 
 Object extractor (0.1.0):
 https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
@@ -1234,6 +1234,74 @@ rather than a code fix.
 `SmartAdvisorActionRecorder-0.1.0-x86`, record the No Bill on File
 workflow end to end, and use the recording to replace the remaining
 guessed selectors.
+
+### 17.10 0.3.0 makes the launch route self-diagnosing
+
+0.2.9 was tried on another device and the outcome was not reported back,
+so 0.3.0 is built to answer the question itself rather than guess which
+hypothesis was true.
+
+`_launch_open_bill` is replaced by `_try_launch_open_bill`, which
+escalates once per route per `attach()` call:
+
+- **stage 0** - send Ctrl+O (`_send_open_bill_shortcut`, unchanged);
+- **stage 1** - click the toolbar button instead
+  (`_click_open_bill_toolbar`), for the case where the window accepts
+  Ctrl+O but nothing happens;
+- **stage 2 onward** - do nothing, since every resolution strategy has
+  already failed by then and repeating an action risks opening a second,
+  ambiguous copy.
+
+Both routes record into the single `open_bill_launch` trace stage, so one
+run now distinguishes every hypothesis: `shortcut_sent` then
+`toolbar_click_sent` means Ctrl+O was insufficient and the fallback
+fired; `shortcut_sent` alone means Open Bill appeared after the
+accelerator; `toolbar_not_found` means even `Toolbar1` could not be
+resolved.
+
+The fallback comes from the third control picker report:
+
+- `Toolbar1` at (463, 224); the confirmed button rect
+  (504, 224)-(528, 252), so its centre is **+53, +14** from the toolbar's
+  top-left, stored as `OPEN_BILL_TOOLBAR_BUTTON_OFFSET`.
+- pywinauto's `click_input(coords=...)` is relative to the wrapper's own
+  rectangle, so this is a parent-anchored offset from a verified anchor -
+  Stage 1 fallback rule 4 - and not an absolute screen coordinate.
+
+This revises the judgement recorded in 17.7. The blanket claim that a
+position-based click was unreliable because of provider duplication was
+too pessimistic: the duplication is real but sits around x=476-503 (two
+nodes overlapping there), while the target's x range 504-528 is occupied
+by exactly one child. Index-based selection stays rejected, and now for a
+concrete reason - child order is not visual order, since `sibling_26`
+sits at x=476, visually left of `sibling_0` at x=479, yet is enumerated
+27th.
+
+Other facts harvested from that report:
+
+- The main window's `AutomationId` is `bilMain`, recorded as
+  `SMARTADVISOR_WINDOW_AUTOMATION_ID`. Window identity still matches on
+  title plus class prefix; the constant is for disambiguation only and
+  deliberately does not change detection.
+- While Open Bill is up, `bilMain` reports `enabled: false` - a clean
+  modal-state signal if one is ever needed.
+- In UIA, `frmBillOpen` enumerates as a **direct child of `bilMain`**,
+  which refines the 17.4 finding that Open Bill is a separate top-level
+  process root; both hold depending on how the tree is walked.
+- All 32 of `Toolbar1`'s children are identity-less `Custom` nodes with
+  `handle: null`, so `find_direct_uia_control` can never wrap one - it
+  requires an AutomationId match, the WinForms class prefix, and a
+  non-null handle.
+
+Tests: `test_attach_sends_ctrl_o_then_falls_back_to_the_toolbar` asserts
+Ctrl+O fires exactly once, the toolbar is clicked exactly once at
+(53, 14), and the trace records both outcomes in order;
+`test_attach_records_toolbar_not_found_when_toolbar_unresolvable` covers
+the unresolvable-anchor path. 66 tests pass.
+
+**Next action:** run 0.3.0 without opening Open Bill manually first, save
+the diagnostics trace, and read the `open_bill_launch` outcomes. That one
+stage now settles which route works.
 
 ## 18. Control Picker Runbook
 

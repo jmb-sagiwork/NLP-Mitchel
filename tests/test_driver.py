@@ -161,10 +161,12 @@ def test_attach_retries_while_open_bill_still_renders(monkeypatch) -> None:
     assert attempts["count"] >= 3
 
 
-def test_attach_sends_ctrl_o_when_open_bill_not_open(monkeypatch) -> None:
-    """If Open Bill isn't open yet, attach should send Ctrl+O to the main
-    window (the app's own accelerator for opening it), then keep polling
-    for it to render."""
+def test_attach_sends_ctrl_o_then_falls_back_to_the_toolbar(
+    monkeypatch,
+) -> None:
+    """If Open Bill isn't open yet, attach sends Ctrl+O first (the app's
+    own accelerator), and if it still hasn't rendered, clicks the toolbar
+    button instead - each route tried exactly once."""
 
     calls = {"set_focus": 0, "type_keys": []}
     window = SimpleNamespace(
@@ -173,6 +175,10 @@ def test_attach_sends_ctrl_o_when_open_bill_not_open(monkeypatch) -> None:
             "set_focus", calls["set_focus"] + 1
         ),
         type_keys=lambda keys: calls["type_keys"].append(keys),
+    )
+    clicks: list[tuple[int, int]] = []
+    toolbar = SimpleNamespace(
+        click_input=lambda coords: clicks.append(coords)
     )
 
     monkeypatch.setattr(
@@ -183,21 +189,70 @@ def test_attach_sends_ctrl_o_when_open_bill_not_open(monkeypatch) -> None:
         "smartadvisor_automation.driver.find_open_bill_frame",
         lambda _backend, _window, **_kwargs: None,
     )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_direct_uia_control",
+        lambda _backend, _parent, _automation_id: toolbar,
+    )
     driver = SmartAdvisorDriver(poll_interval=0.01)
 
     with pytest.raises(AutomationError) as captured:
-        driver.attach(CONTROLS_BY_STEP["1"], timeout=0.2)
+        driver.attach(CONTROLS_BY_STEP["1"], timeout=0.3)
 
     assert (
         captured.value.code
         == "smartadvisor_open_bill_frame_not_accessible"
     )
-    assert calls["set_focus"] == 1
+    # Ctrl+O exactly once, never repeated on later retries.
     assert calls["type_keys"] == ["^o"]
+    # Toolbar clicked exactly once, at the parent-relative offset.
+    assert clicks == [(53, 14)]
 
     launch_steps = [
         step
         for step in captured.value.diagnostics["steps"]
         if step["stage"] == "open_bill_launch"
     ]
-    assert [step["outcome"] for step in launch_steps] == ["shortcut_sent"]
+    assert [step["outcome"] for step in launch_steps] == [
+        "shortcut_sent",
+        "toolbar_click_sent",
+    ]
+
+
+def test_attach_records_toolbar_not_found_when_toolbar_unresolvable(
+    monkeypatch,
+) -> None:
+    """The fallback needs Toolbar1 itself; if that cannot be resolved the
+    trace says so instead of guessing at screen coordinates."""
+
+    window = SimpleNamespace(
+        element_info=SimpleNamespace(process_id=1234),
+        set_focus=lambda: None,
+        type_keys=lambda _keys: None,
+    )
+
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_smartadvisor_window",
+        lambda _backend, **_kwargs: window,
+    )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_open_bill_frame",
+        lambda _backend, _window, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_direct_uia_control",
+        lambda _backend, _parent, _automation_id: None,
+    )
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+
+    with pytest.raises(AutomationError) as captured:
+        driver.attach(CONTROLS_BY_STEP["1"], timeout=0.3)
+
+    launch_steps = [
+        step
+        for step in captured.value.diagnostics["steps"]
+        if step["stage"] == "open_bill_launch"
+    ]
+    assert [step["outcome"] for step in launch_steps] == [
+        "shortcut_sent",
+        "toolbar_not_found",
+    ]

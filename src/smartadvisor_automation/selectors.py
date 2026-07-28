@@ -9,6 +9,24 @@ OPEN_BILL_FRAME_AUTOMATION_ID = "Frame1"
 OPEN_BILL_FRAME_NAME = "Enter Bill To Edit"
 OPEN_BILL_CLIENT_AUTOMATION_ID = "cboClient"
 
+# Main-window AutomationId, confirmed by the control picker. Window
+# identity still matches on title and class prefix; this is recorded for
+# disambiguation only.
+SMARTADVISOR_WINDOW_AUTOMATION_ID = "bilMain"
+
+# Fallback route to Open Bill when the Ctrl+O accelerator does nothing.
+# The toolbar button itself is a synthetic MSAA "Custom" node with no
+# AutomationId, control_id, class_name, or handle, so it cannot be
+# resolved as a selector at all - but its parent toolbar can be, and the
+# button's position within that parent is stable. Measured from the
+# control picker report: Toolbar1 at (463, 224), button rect
+# (504, 224)-(528, 252), so the button centre is +53, +14 from the
+# toolbar's top-left. No other toolbar child occupies that x range, so
+# the provider-duplication seen further left (two nodes around x=476-503)
+# does not affect this point.
+MAIN_TOOLBAR_AUTOMATION_ID = "Toolbar1"
+OPEN_BILL_TOOLBAR_BUTTON_OFFSET = (53, 14)
+
 NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ControlSpec(
         step="1",

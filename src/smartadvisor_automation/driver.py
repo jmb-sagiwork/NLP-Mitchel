@@ -14,6 +14,10 @@ from smartadvisor_automation.probe import (
     find_smartadvisor_window,
     matching_elements,
 )
+from smartadvisor_automation.selectors import (
+    MAIN_TOOLBAR_AUTOMATION_ID,
+    OPEN_BILL_TOOLBAR_BUTTON_OFFSET,
+)
 
 
 class SmartAdvisorDriver:
@@ -53,7 +57,7 @@ class SmartAdvisorDriver:
         )
         saw_smartadvisor_window = False
         saw_open_bill_frame = False
-        attempted_launch = False
+        launch_stage = 0
         attempt = 0
 
         while True:
@@ -98,9 +102,10 @@ class SmartAdvisorDriver:
                     )
                     continue
                 if landmark_scope is None:
-                    if not attempted_launch and backend == "uia":
-                        attempted_launch = True
-                        self._launch_open_bill(window, trace=trace)
+                    if backend == "uia":
+                        launch_stage = self._try_launch_open_bill(
+                            window, launch_stage, trace=trace
+                        )
                     continue
                 saw_open_bill_frame = True
 
@@ -147,26 +152,40 @@ class SmartAdvisorDriver:
             code, step=landmark.step, diagnostics=trace.to_report()
         )
 
+    def _try_launch_open_bill(
+        self,
+        main_window: Any,
+        launch_stage: int,
+        *,
+        trace: DiagnosticTrace,
+    ) -> int:
+        """Escalate through the ways of opening Open Bill, once each.
+
+        Stage 0 sends the application's own Ctrl+O accelerator. Stage 1
+        clicks the toolbar button instead, for the case where Ctrl+O is
+        accepted by the window but does nothing. Stage 2 onward does
+        nothing at all: by the time this runs every resolution strategy
+        has already failed to find Open Bill, so repeating an action could
+        open a second, ambiguous copy instead of waiting for the first to
+        render.
+
+        Both outcomes land in the `open_bill_launch` trace stage, so the
+        trace says which route was taken and whether it worked.
+        """
+
+        if launch_stage == 0:
+            self._send_open_bill_shortcut(main_window, trace=trace)
+            return 1
+        if launch_stage == 1:
+            self._click_open_bill_toolbar(main_window, trace=trace)
+            return 2
+        return launch_stage
+
     @staticmethod
-    def _launch_open_bill(
+    def _send_open_bill_shortcut(
         main_window: Any, *, trace: DiagnosticTrace
     ) -> None:
-        """Send Ctrl+O to the main window to open Open Bill.
-
-        The toolbar button that does the same thing turned out to have no
-        AutomationId, control_id, class_name, or handle at all - a
-        synthetic MSAA "Custom" element identifiable only by its position,
-        and the sibling list showed signs of the same provider-duplication
-        issue documented in pipeline.md 11.9, making a position-based click
-        unreliable to click safely. Ctrl+O is the application's own
-        keyboard accelerator for the same action.
-
-        Only tried once per attach() call (see `attempted_launch`), since
-        every resolution strategy already failed to find Open Bill by the
-        time this runs - sending the shortcut again on a later retry could
-        open a second, ambiguous copy instead of just waiting for the
-        first one to render.
-        """
+        """Send Ctrl+O to the main window, the app's own accelerator."""
 
         stage = "open_bill_launch"
         try:
@@ -182,6 +201,47 @@ class SmartAdvisorDriver:
             return
 
         trace.record(stage, "uia", "shortcut_sent")
+
+    @staticmethod
+    def _click_open_bill_toolbar(
+        main_window: Any, *, trace: DiagnosticTrace
+    ) -> None:
+        """Click the Open Bill toolbar button by position within Toolbar1.
+
+        The button itself has no AutomationId, control_id, class_name, or
+        handle, so it cannot be resolved as a selector. Its parent toolbar
+        can be, and pywinauto's `coords` are relative to the wrapper's own
+        rectangle - so this is a parent-anchored offset, not an absolute
+        screen coordinate.
+        """
+
+        stage = "open_bill_launch"
+        toolbar = find_direct_uia_control(
+            "uia", main_window, MAIN_TOOLBAR_AUTOMATION_ID
+        )
+        if toolbar is None:
+            trace.record(stage, "uia", "toolbar_not_found")
+            return
+
+        try:
+            main_window.set_focus()
+            toolbar.click_input(coords=OPEN_BILL_TOOLBAR_BUTTON_OFFSET)
+        except Exception as exc:
+            trace.record(
+                stage,
+                "uia",
+                "toolbar_click_failed",
+                exception=type(exc).__name__,
+            )
+            return
+
+        trace.record(
+            stage,
+            "uia",
+            "toolbar_click_sent",
+            offset_x=OPEN_BILL_TOOLBAR_BUTTON_OFFSET[0],
+            offset_y=OPEN_BILL_TOOLBAR_BUTTON_OFFSET[1],
+        )
 
     def _windows_for_process(self) -> list[Any]:
         if self.backend is None or self.process_id is None:
