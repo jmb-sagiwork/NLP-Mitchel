@@ -758,12 +758,23 @@ No selector, coordinate, hard-coded handle, or field-value logging was added.
 Current direct downloads:
 
 ```text
-Automation:
-https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.2.3-x86.exe
+Automation (0.2.9):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.2.9-x86.exe
 
-Object extractor:
+Object extractor (0.1.0):
 https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
+
+Control picker (0.2.0):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorControlPicker-0.2.0-x86.exe
+
+Action recorder (0.1.0):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorActionRecorder-0.1.0-x86.exe
 ```
+
+Every link points at `main`, so a link resolves only once that exact
+filename is committed to `release/` on `main`. Keep this block in step
+with the `.gitignore` allowlist - the two are the definition of what is
+downloadable.
 
 ## 16. Relevant Source Map
 
