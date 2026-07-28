@@ -9,8 +9,11 @@ $extractorName = "SmartAdvisorObjectExtractor"
 $extractorVersion = "0.1.0"
 $extractorArtifactName = "$extractorName-$extractorVersion-$architecture"
 $pickerName = "SmartAdvisorControlPicker"
-$pickerVersion = "0.1.0"
+$pickerVersion = "0.2.0"
 $pickerArtifactName = "$pickerName-$pickerVersion-$architecture"
+$recorderName = "SmartAdvisorActionRecorder"
+$recorderVersion = "0.1.0"
+$recorderArtifactName = "$recorderName-$recorderVersion-$architecture"
 Push-Location $repositoryRoot
 
 try {
@@ -93,6 +96,25 @@ try {
         --collect-submodules pywinauto `
         src/smartadvisor_automation/control_picker_app.py
 
+    $recorderBuildDirectory = Join-Path $repositoryRoot "build\recorder"
+    New-Item `
+        -ItemType Directory `
+        -Force `
+        -Path $recorderBuildDirectory | Out-Null
+
+    python -m PyInstaller `
+        --noconfirm `
+        --clean `
+        --windowed `
+        --onefile `
+        --name $recorderArtifactName `
+        --specpath $recorderBuildDirectory `
+        --workpath $recorderBuildDirectory `
+        --distpath release `
+        --paths src `
+        --collect-submodules pywinauto `
+        src/smartadvisor_automation/action_recorder_app.py
+
     Write-Output "Package: $packageDirectory"
     Write-Output "Transfer archive: $archivePath"
     Write-Output (
@@ -112,6 +134,14 @@ try {
         (
             Join-Path $repositoryRoot (
                 "release\$pickerArtifactName.exe"
+            )
+        )
+    )
+    Write-Output (
+        "Action recorder: " +
+        (
+            Join-Path $repositoryRoot (
+                "release\$recorderArtifactName.exe"
             )
         )
     )

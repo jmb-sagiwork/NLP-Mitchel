@@ -6,7 +6,8 @@ from typing import Any
 from smartadvisor_automation.object_extractor import _uia_node
 from smartadvisor_automation.probe import find_smartadvisor_window
 
-PICKER_VERSION = "0.1.0"
+PICKER_VERSION = "0.2.0"
+MAX_LABEL_LENGTH = 60
 
 
 class PickerError(RuntimeError):
@@ -17,16 +18,33 @@ class PickerError(RuntimeError):
         self.code = code
 
 
-def describe_candidate(wrapper: Any) -> dict[str, object]:
+def describe_candidate(
+    wrapper: Any,
+    *,
+    node_id: str = "candidate",
+    parent_id: str | None = None,
+    depth: int = 0,
+) -> dict[str, object]:
     """Return the same privacy-safe fields the object extractor records."""
 
     return _uia_node(
         "uia",
         wrapper.element_info,
-        node_id="candidate",
-        parent_id=None,
-        depth=0,
+        node_id=node_id,
+        parent_id=parent_id,
+        depth=depth,
     )
+
+
+def sanitize_label(value: object) -> str:
+    """Normalize a user-typed entry label and cap its length.
+
+    Labels are structural nicknames for a control ("open bill launcher"),
+    never field values, so they are stored as typed after whitespace
+    collapsing and truncation.
+    """
+
+    return " ".join(str(value or "").split())[:MAX_LABEL_LENGTH]
 
 
 def find_start_window() -> Any:
@@ -59,13 +77,16 @@ def walk(root: Any):
       descend into its children and restart the sibling walk one level
       deeper.
     - "final": the candidate is the exact control to click; the walk ends
-      and `(candidate, siblings)` is available as the StopIteration value.
+      and `(candidate, siblings, path)` is available as the StopIteration
+      value, where `path` is the ancestor chain that was descended through
+      to reach it, starting at `root`.
 
     Raises PickerError if a level has no children, or every sibling at a
     level is answered "no" without ever reaching "yes" or "final".
     """
 
     parent = root
+    path: list[Any] = [root]
     while True:
         siblings = child_elements(parent)
         if not siblings:
@@ -81,29 +102,79 @@ def walk(root: Any):
                 continue
             if answer == "yes":
                 parent = candidate
+                path.append(candidate)
                 descended = True
                 break
             if answer == "final":
-                return candidate, siblings
+                return candidate, siblings, list(path)
             raise ValueError(f"Unknown answer: {answer!r}")
 
         if not descended:
             raise PickerError("no_match_at_this_level")
 
 
-def build_report(
-    confirmed: Any, siblings: list[Any]
+def build_entry(
+    confirmed: Any,
+    siblings: list[Any],
+    path: list[Any],
+    *,
+    label: str = "",
+    index: int = 1,
 ) -> dict[str, object]:
-    """Build the redacted report for the confirmed final control."""
+    """Build one redacted recording entry for a confirmed control.
+
+    `path` is the ancestor chain `walk()` descended through, so the entry
+    records how the control was reached and not just what it is.
+    """
+
+    described_path = [
+        describe_candidate(
+            node,
+            node_id=f"path_{depth}",
+            parent_id=f"path_{depth - 1}" if depth else None,
+            depth=depth,
+        )
+        for depth, node in enumerate(path)
+    ]
+    depth = len(described_path)
+    parent_id = described_path[-1]["node_id"] if described_path else None
 
     return {
-        "schema_version": 1,
+        "entry_index": index,
+        "label": sanitize_label(label),
+        "path_depth": depth,
+        "path": described_path,
+        "confirmed": describe_candidate(
+            confirmed,
+            node_id="confirmed",
+            parent_id=parent_id,
+            depth=depth,
+        ),
+        "siblings": [
+            describe_candidate(
+                sibling,
+                node_id=f"sibling_{position}",
+                parent_id=parent_id,
+                depth=depth,
+            )
+            for position, sibling in enumerate(siblings)
+        ],
+    }
+
+
+def build_recording_report(
+    entries: list[dict[str, object]],
+) -> dict[str, object]:
+    """Wrap every recorded entry in a single redacted report."""
+
+    return {
+        "schema_version": 2,
         "picker_version": PICKER_VERSION,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {
             "read_only": True,
             "includes_field_values": False,
         },
-        "confirmed": describe_candidate(confirmed),
-        "siblings": [describe_candidate(sibling) for sibling in siblings],
+        "entry_count": len(entries),
+        "entries": entries,
     }

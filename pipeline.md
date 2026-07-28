@@ -758,12 +758,23 @@ No selector, coordinate, hard-coded handle, or field-value logging was added.
 Current direct downloads:
 
 ```text
-Automation:
-https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.2.3-x86.exe
+Automation (0.2.9):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorAutomation-0.2.9-x86.exe
 
-Object extractor:
+Object extractor (0.1.0):
 https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorObjectExtractor-0.1.0-x86.exe
+
+Control picker (0.2.0):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorControlPicker-0.2.0-x86.exe
+
+Action recorder (0.1.0):
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorActionRecorder-0.1.0-x86.exe
 ```
+
+Every link points at `main`, so a link resolves only once that exact
+filename is committed to `release/` on `main`. Keep this block in step
+with the `.gitignore` allowlist - the two are the definition of what is
+downloadable.
 
 ## 16. Relevant Source Map
 
@@ -783,8 +794,12 @@ https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/Sm
 | `tests/test_object_extractor.py` | Tree traversal, truncation, parent, and redaction tests |
 | `tests/test_report_privacy.py` | Report schema privacy gates |
 | `src/smartadvisor_automation/diagnostics.py` | Redacted step-by-step attach trace collector |
-| `src/smartadvisor_automation/control_picker.py` | Highlight-and-confirm control walk (generator) and redacted report builder |
-| `src/smartadvisor_automation/control_picker_app.py` | Standalone control picker Tkinter UI |
+| `src/smartadvisor_automation/control_picker.py` | Highlight-and-confirm control walk (generator), path capture, and redacted multi-entry recording builder |
+| `src/smartadvisor_automation/control_picker_app.py` | Standalone control picker Tkinter UI and recording session |
+| `src/smartadvisor_automation/input_hooks.py` | Low-level mouse/keyboard hooks, private message pump, key classification |
+| `src/smartadvisor_automation/action_recorder.py` | Raw input events to redacted, replayable steps; UIA point/focus resolver |
+| `src/smartadvisor_automation/action_recorder_app.py` | Standalone action recorder Tkinter UI |
+| `tests/test_action_recorder.py` | Step aggregation, own-UI filtering, key classification, and report privacy tests |
 | `tests/test_control_picker.py` | Walk state-machine and report-shape regression tests |
 
 ## 17. Current Handoff State
@@ -1108,12 +1123,124 @@ should still resolve on a later attempt; a shortcut that reliably does
 nothing would need a different signal (e.g. checking the menu's own
 accelerator text) rather than assuming Ctrl+O universally.
 
+### 17.8 Picker 0.2.0 records many controls, with paths, in one report
+
+Feedback after the three 0.1.0 runs: saving one JSON per confirmed control
+is wasteful, and the report never said *how* a control was reached. 0.1.0's
+`build_report` kept only `confirmed` and `siblings`, so every container
+answered **Yes (dig deeper)** was discarded - the ancestor chain that a
+scoped selector actually needs was thrown away at the moment it was
+established.
+
+Picker 0.2.0:
+
+- `walk()` maintains a `path` list, appending each container it descends
+  into, and returns `(candidate, siblings, path)` on **Final**. `path[0]`
+  is the SmartAdvisor main window, so the chain is self-contained.
+- `build_entry()` replaces `build_report()`: one redacted entry holding
+  `entry_index`, `label`, `path_depth`, the described `path`, `confirmed`,
+  and `siblings`. Path nodes carry real `depth`/`parent_id` links
+  (`path_0` → `path_1` → ... → `confirmed`) instead of 0.1.0's flat
+  `depth=0`/`parent_id=None`.
+- `build_recording_report()` wraps every entry in one `schema_version: 2`
+  report with an `entries` array and `entry_count`.
+- The UI is now **Record a control** / **Save recording** / **Discard
+  all**, with a listbox of what has been recorded. A walk that stops on
+  `no_children_at_this_level` or `no_match_at_this_level` keeps the
+  already-recorded entries and offers to save them, rather than losing
+  earlier work to a later mistake.
+- Each entry takes an optional short structural label (whitespace
+  collapsed, capped at `MAX_LABEL_LENGTH` = 60) so the three targets are
+  distinguishable inside one file the way the three filenames used to be.
+  The prompt explicitly says not to enter customer data; every other
+  field still runs through the object extractor's redaction rules.
+- Still strictly read-only - recording changed what is saved, never what
+  is touched.
+- `tests/test_control_picker.py` gains path-return, path-in-entry,
+  path-wide redaction, multi-entry report, and label-sanitizing tests
+  (10 picker tests; 50 across the suite).
+
+**Next action:** build and publish `SmartAdvisorControlPicker-0.2.0-x86`,
+then use one recording session for the next batch of unknown controls.
+
+### 17.9 The real requirement was an action recorder, not a picker
+
+Clarified requirement: the tool should record a whole workflow as the
+operator performs it, and that recording is the input to writing the
+automation - "when i feed it you, you will be able to automate
+SmartAdvisor". The control picker answers *what is this one control*; it
+cannot answer *what did the operator do, in what order*.
+
+Built as `SmartAdvisorActionRecorder`, a fourth standalone read-only
+executable. Two research passes settled the mechanism before any code:
+
+- **Selector contract** (from `driver.py`/`models.py`): `ControlSpec` is
+  `automation_id` alone, and `resolve()` requires **exactly one** visible
+  and enabled match across all process windows, else
+  `selector_ambiguous`/`selector_not_found`. A recording that omitted
+  match count would produce code that fails at run time, so the recorder
+  computes `match_count` per step the same way `_all_elements` does, and
+  the report's `review` section lists offending steps up front.
+- **Capture mechanism**: `SetWindowsHookEx` `WH_MOUSE_LL`/`WH_KEYBOARD_LL`
+  through stdlib `ctypes` - no admin, no new dependency, and verified
+  working locally (installed cleanly, captured an injected `{F12}`,
+  unhooked cleanly). Rejected: `GetAsyncKeyState` polling (misses fast
+  clicks, cannot order keystrokes) and UIA `Invoke` event handlers
+  (WinForms surfaces controls through the MSAA bridge and frequently
+  raises no `Invoke` at all, and cross-process handlers apply
+  back-pressure to SmartAdvisor's own UI thread).
+- **Identity at event time**: `UIAElementInfo.from_point(x, y)` (~2.7 ms)
+  for clicks, `IUIA().get_focused_element()` (~0.9 ms) for typing.
+
+Design consequences worth remembering:
+
+- The hook callback is allocation-only - it appends a tuple to a
+  `queue.Queue` and returns. Windows silently unhooks a low-level hook
+  whose callback exceeds `LowLevelHooksTimeout` (300 ms default, not set
+  on the dev machine), and a slow callback delays input for the entire
+  desktop. All UIA resolution happens on the Tk thread draining the queue
+  every 50 ms, matching the existing `after()` pattern in `app.py`.
+- `LRESULT`/`LPARAM` must be `ctypes.c_ssize_t`, not `wintypes.LPARAM`,
+  or every callback raises `OverflowError` on the `CallNextHookEx`
+  round-trip - and `--windowed` swallows the traceback, so the recorder
+  would just silently capture nothing. Both `HOOKPROC` objects are held
+  as instance attributes; if either is collected the process crashes on
+  the next event.
+- **Typed characters are never captured.** A character key emits
+  `("char", timestamp)` with no identity, and consecutive characters in
+  one control collapse into a single `input` step whose value is
+  `{"status": "not_recorded", "source": "run_parameter"}` - the value
+  arrives at run time from a workflow parameter, as `claim_id` and
+  `dos_from` already do. A character key held with Ctrl or Alt is an
+  accelerator rather than data, so `^o` is recorded; `{TAB}`/`{ENTER}`
+  and F-keys are recorded as structural navigation. Keys with neither a
+  replayable name nor a text contribution (F13, media keys) are dropped
+  rather than mistaken for typing.
+- The recorder filters its own process out of every step
+  (`ignore_process_id`), since its buttons are driven by the same mouse
+  that is being recorded.
+- `tests/test_action_recorder.py` runs the aggregator against a fake
+  resolver - no pywinauto, no hooks, no Tk - and asserts the report
+  passes the same `FORBIDDEN_KEYS` gate as `tests/test_report_privacy.py`
+  (14 recorder tests; 65 across the suite).
+
+Deployment risk to settle before rollout: an unsigned one-file EXE that
+installs a global keyboard hook is a strong heuristic trigger for AV/EDR,
+and the existing builds use `upx=True`. In a managed Citrix estate this is
+the most likely reason the tool never runs, and it is a policy conversation
+rather than a code fix.
+
+**Next action:** build and publish
+`SmartAdvisorActionRecorder-0.1.0-x86`, record the No Bill on File
+workflow end to end, and use the recording to replace the remaining
+guessed selectors.
+
 ## 18. Control Picker Runbook
 
 Download:
 
 ```text
-https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorControlPicker-0.1.0-x86.exe
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorControlPicker-0.2.0-x86.exe
 ```
 
 Use this whenever a control's `AutomationId` is unknown or a guess turned
@@ -1130,7 +1257,7 @@ Before starting:
 
 Walking:
 
-1. Select **Start walk**. The first child of the main window is
+1. Select **Record a control**. The first child of the main window is
    highlighted in red on screen and a confirm dialog appears.
 2. For each highlighted control:
    - **No** - not this one, move to the next sibling.
@@ -1138,10 +1265,82 @@ Walking:
      (like a toolbar or menu), not the control itself; descend into its
      children.
    - **Final (this is it)** - this exact control is the one to click; the
-     walk stops here.
-3. Save the report (default `SmartAdvisor-control-report.json`) and attach
-   it to the development conversation.
+     walk stops here and the control is recorded.
+3. Give the recorded control a short structural label when prompted, e.g.
+   `open bill launcher`. Optional, and never customer data.
+4. Repeat from step 1 for every control you need in this batch. Each walk
+   restarts at the SmartAdvisor main window; the listbox shows what has
+   been recorded so far.
+5. Select **Save recording** once (default
+   `SmartAdvisor-control-report.json`) and attach the single file to the
+   development conversation.
 
-The report's `confirmed.automation_id` (and `control_type`/`class_name`)
-is what gets hardcoded into `selectors.py` - the picker itself never
-clicks anything in SmartAdvisor.
+Each entry's `confirmed.automation_id` (and `control_type`/`class_name`)
+is what gets hardcoded into `selectors.py`, and its `path` is the
+main-window-down ancestor chain to scope that lookup against. The picker
+itself never clicks anything in SmartAdvisor.
+
+If a walk stops early (every sibling answered **No**, or a level with no
+children), earlier entries are kept - save them rather than restarting the
+whole batch.
+
+## 19. Action Recorder Runbook
+
+Download:
+
+```text
+https://github.com/jmb-sagiwork/Sagi-SmartAdvisor/raw/refs/heads/main/release/SmartAdvisorActionRecorder-0.1.0-x86.exe
+```
+
+Use this to capture a whole workflow. The control picker answers "what is
+this one control"; the recorder answers "what did the operator do, in what
+order" - which is what turning a manual process into automation actually
+requires.
+
+Before starting:
+
+1. Enter the Citrix desktop containing SmartAdvisor.
+2. Sign in to SmartAdvisor manually.
+3. Get to the point where the workflow begins.
+4. Run the recorder in the same session and at the same elevation level.
+   A non-elevated hook cannot see input sent to an elevated window.
+
+Recording:
+
+1. Select **Start recording**. The recorder stays on top and lists steps
+   as they happen; it does not take focus from SmartAdvisor.
+2. Perform the workflow at normal speed, using the mouse and keyboard as
+   usual. Avoid clicking the recorder's own window mid-run - its process
+   is filtered out, but every stray click is a step you have to review.
+3. Select **Stop recording** when the workflow is complete.
+4. Review the list. Watch for these flags:
+   - `[NO ID]` - the control has no `AutomationId` and cannot be
+     automated as recorded (this is what killed the Open Bill toolbar
+     button in 0.2.8; the fix was an accelerator, per 17.7).
+   - `[AMBIGUOUS xN]` - N visible enabled controls shared that
+     `AutomationId`, so `resolve()` would raise `selector_ambiguous`.
+     That step needs a scoped parent, not a bare selector.
+   - `[NEW WINDOW]` - the step's owning window changed, i.e. a modal
+     opened. Useful for finding where waits actually matter.
+5. **Label selected step** for anything whose purpose is not obvious from
+   its `AutomationId`, especially text entries - the label is how the step
+   gets matched to a run parameter such as `claim_id`. Never customer data.
+6. **Drop selected step** for stray clicks and mis-hits.
+7. Select **Save recording** (default
+   `SmartAdvisor-action-recording.json`) and attach the file to the
+   development conversation.
+
+What the recording does and does not contain:
+
+- It contains, per step: the action (`click`/`input`/`key`), the target's
+  `automation_id`/`control_type`/`class_name`, its ancestor `path`, the
+  owning `window`, `match_count`, `seconds_since_previous`, and any
+  `keys` chord such as `^o`.
+- It does **not** contain typed characters, control text, or field values.
+  A text entry appears as `{"status": "not_recorded", "source":
+  "run_parameter"}`, so the recording is safe to attach to a
+  conversation. Names are redacted unless on the structural allowlist,
+  and the report passes the same privacy gate as every other report here.
+- `seconds_since_previous` is operator pace, not a required wait. It is
+  the signal for whether the driver's 12 s resolve timeout is enough; the
+  generated automation should still wait on resolvability, never sleep.
