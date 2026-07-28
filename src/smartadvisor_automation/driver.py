@@ -14,51 +14,6 @@ from smartadvisor_automation.probe import (
     find_smartadvisor_window,
     matching_elements,
 )
-from smartadvisor_automation.selectors import (
-    MAIN_TOOLBAR_AUTOMATION_ID,
-    OPEN_BILL_TOOLBAR_BUTTON_TITLE,
-    OPEN_BILL_WINDOW_AUTOMATION_ID,
-    SMARTADVISOR_WINDOW_AUTOMATION_ID,
-)
-
-
-def open_bill_keyless() -> None:
-    """Open the Open Bill dialog through its legacy accessible action."""
-
-    from pywinauto import Desktop
-
-    desktop = Desktop(backend="uia")
-
-    main = desktop.window(
-        auto_id=SMARTADVISOR_WINDOW_AUTOMATION_ID,
-        control_type="Window",
-    )
-    main.wait("exists visible enabled", timeout=15)
-
-    toolbar = main.child_window(
-        auto_id=MAIN_TOOLBAR_AUTOMATION_ID,
-        control_type="ToolBar",
-    )
-    toolbar.wait("exists visible enabled", timeout=10)
-
-    button = toolbar.child_window(
-        title=OPEN_BILL_TOOLBAR_BUTTON_TITLE,
-    )
-    button.wait("exists visible enabled", timeout=10)
-
-    button_wrapper = button.wrapper_object()
-    button_wrapper.iface_legacy_iaccessible.DoDefaultAction()
-
-    dialog = desktop.window(
-        auto_id=OPEN_BILL_WINDOW_AUTOMATION_ID,
-        control_type="Window",
-    )
-    try:
-        dialog.wait("exists visible enabled", timeout=5)
-    except Exception as exc:
-        raise RuntimeError(
-            "MSAA default action ran, but the Open Bill dialog did not appear."
-        ) from exc
 
 
 class SmartAdvisorDriver:
@@ -200,36 +155,33 @@ class SmartAdvisorDriver:
         *,
         trace: DiagnosticTrace,
     ) -> int:
-        """Try the keyless Open Bill action once, then only poll.
-
-        Repeating the default action while the first dialog is still
-        rendering could open a second, ambiguous Open Bill window.
-        """
+        """Send Ctrl+O once, then only poll for the modal Open Bill window."""
 
         if launch_stage == 0:
-            self._invoke_open_bill_default_action(trace=trace)
+            self._send_open_bill_shortcut(main_window, trace=trace)
             return 1
         return launch_stage
 
     @staticmethod
-    def _invoke_open_bill_default_action(
-        *, trace: DiagnosticTrace
+    def _send_open_bill_shortcut(
+        main_window: Any, *, trace: DiagnosticTrace
     ) -> None:
-        """Invoke Open Bill without moving the mouse or typing."""
+        """Send the application's Ctrl+O Open Bill accelerator once."""
 
         stage = "open_bill_launch"
         try:
-            open_bill_keyless()
+            main_window.set_focus()
+            main_window.type_keys("^o")
         except Exception as exc:
             trace.record(
                 stage,
                 "uia",
-                "legacy_default_action_failed",
+                "shortcut_failed",
                 exception=type(exc).__name__,
             )
             return
 
-        trace.record(stage, "uia", "legacy_default_action_completed")
+        trace.record(stage, "uia", "shortcut_sent")
 
     def _windows_for_process(self) -> list[Any]:
         if self.backend is None or self.process_id is None:
@@ -325,6 +277,15 @@ class SmartAdvisorDriver:
             element.click_input()
         except Exception as exc:
             raise AutomationError("click_failed", step=spec.step) from exc
+
+    def invoke(self, spec: ControlSpec) -> None:
+        """Invoke a UIA control without moving the mouse."""
+
+        element = self.resolve(spec)
+        try:
+            element.iface_invoke.Invoke()
+        except Exception as exc:
+            raise AutomationError("invoke_failed", step=spec.step) from exc
 
     def clear(self, spec: ControlSpec) -> None:
         element = self.resolve(spec)

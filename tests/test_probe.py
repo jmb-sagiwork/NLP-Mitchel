@@ -221,10 +221,10 @@ def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
     monkeypatch,
 ) -> None:
     winforms_class = "WindowsForms10.Window.8.app.0.dynamic_ad1"
-    client_info = SimpleNamespace(
-        automation_id="cboClient",
+    action_info = SimpleNamespace(
+        automation_id="_cmdSearch_1",
         name="",
-        control_type="ComboBox",
+        control_type="Button",
         class_name=winforms_class,
         handle=400,
         children=lambda: [],
@@ -235,7 +235,7 @@ def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
         control_type="Group",
         class_name=winforms_class,
         handle=300,
-        children=lambda: [client_info],
+        children=lambda: [action_info],
     )
     open_bill_info = SimpleNamespace(
         automation_id="frmBillOpen",
@@ -251,7 +251,7 @@ def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
     )
     open_bill = SimpleNamespace(element_info=open_bill_info)
     frame = SimpleNamespace(element_info=frame_info)
-    client = SimpleNamespace(element_info=client_info)
+    action = SimpleNamespace(element_info=action_info)
 
     class FakeDesktop:
         def windows(self):
@@ -259,7 +259,7 @@ def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
 
         def window(self, **criteria):
             assert criteria["handle"] in {300, 400}
-            return frame if criteria["handle"] == 300 else client
+            return frame if criteria["handle"] == 300 else action
 
     fake_pywinauto = SimpleNamespace(
         Desktop=lambda backend: FakeDesktop()
@@ -271,7 +271,10 @@ def test_find_open_bill_frame_uses_extractor_proven_uia_chain(
     )
 
     assert find_open_bill_frame("uia", main_window) is frame
-    assert find_direct_uia_control("uia", frame, "cboClient") is client
+    assert (
+        find_direct_uia_control("uia", frame, "_cmdSearch_1")
+        is action
+    )
 
 
 def test_native_enumeration_filters_by_title_class_and_visibility(

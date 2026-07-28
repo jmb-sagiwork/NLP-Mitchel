@@ -22,11 +22,10 @@ def test_workflow_contains_expected_steps() -> None:
         "4",
         "5",
         "6",
-        "7",
-        "8.1",
-        "8.2",
-        "8.3",
-        "9",
+        "7.1",
+        "7.2",
+        "7.3",
+        "8",
     ]
 
 
@@ -34,7 +33,7 @@ def test_amount_step_extracts_then_clicks() -> None:
     amount_control = next(
         control
         for control in NO_BILL_ON_FILE_CONTROLS
-        if control.step == "8.3"
+        if control.step == "7.3"
     )
 
     assert amount_control.action == "extract_click"

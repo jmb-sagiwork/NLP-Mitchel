@@ -10,17 +10,16 @@ and Amount, closes the result window, and displays the result in Tkinter.
 
 ## Automated workflow
 
-1. Click `cboClient`.
-2. Click `_cmdSearch_1`.
-3. Click `263892`, select all text, and clear it.
-4. Click `btnAdvacedSearch`.
-5. Enter Claim ID in `67390`.
-6. Enter DOS From in `67512`.
-7. Click `cmdOK`.
-8. Click `263910`.
-9. Read Patient Account from `198916`.
-10. Read Amount from `329468`, then click that control as specified.
-11. Click `1901400` to close the result window.
+1. Invoke `_cmdSearch_1`.
+2. Click `263892`, select all text, and clear it.
+3. Click `btnAdvacedSearch`.
+4. Enter Claim ID in `67390`.
+5. Enter DOS From in `67512`.
+6. Click `cmdOK`.
+7. Click `263910`.
+8. Read Patient Account from `198916`.
+9. Read Amount from `329468`, then click that control as specified.
+10. Click `1901400` to close the result window.
 
 The application never stores Claim ID, DOS, Patient Account, or Amount on
 disk. It does not handle SmartAdvisor authentication.
@@ -33,18 +32,19 @@ SmartAdvisor detection uses the dynamic native window handle for the exact
 
 The HWND and process ID are discovered at runtime and are never hard-coded.
 Attachment then follows the stable parent hierarchy:
-`Open Bill` window → `Frame1` / `Enter Bill To Edit` group → `cboClient`.
+`Open Bill` window → `Frame1` / `Enter Bill To Edit` group →
+`_cmdSearch_1`.
 
 The attach probe searches visible top-level windows owned by the discovered
 SmartAdvisor process and selects exact UIA `AutomationId=frmBillOpen`. It then
 walks direct UIA children to `AutomationId=Frame1` and verifies the direct
-`AutomationId=cboClient` ComboBox before attaching. HWND values remain dynamic.
+`AutomationId=_cmdSearch_1` Button before attaching. HWND values remain
+dynamic.
 
-When Open Bill is not already visible, version 0.3.1 finds
-`bilMain` → `Toolbar1` → `_Toolbar1_Button2` through UIA and invokes the
-button's legacy IAccessible default action. This launch path does not move the
-mouse or send keyboard input. The strict `frmBillOpen` hierarchy check still
-has to pass before the workflow continues.
+When Open Bill is not already visible, version 0.3.2 focuses the exact
+SmartAdvisor main window and sends `Ctrl+O` once. It then waits for
+`frmBillOpen` → `Frame1` → `_cmdSearch_1` and invokes the button through its
+confirmed UIA InvokePattern without moving the mouse.
 
 ## Object extractor
 
@@ -133,8 +133,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.3.1-x86.zip
-release\SmartAdvisorAutomation-0.3.1-x86.exe
+dist\SmartAdvisorAutomation-0.3.2-x86.zip
+release\SmartAdvisorAutomation-0.3.2-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 release\SmartAdvisorControlPicker-0.2.0-x86.exe
 release\SmartAdvisorActionRecorder-0.1.0-x86.exe

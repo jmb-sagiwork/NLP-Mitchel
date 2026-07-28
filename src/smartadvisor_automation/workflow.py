@@ -21,6 +21,8 @@ ProgressCallback = Callable[[str, str], None]
 class WorkflowDriver(Protocol):
     def attach(self, landmark: ControlSpec) -> str: ...
 
+    def invoke(self, spec: ControlSpec) -> None: ...
+
     def click(self, spec: ControlSpec) -> None: ...
 
     def clear(self, spec: ControlSpec) -> None: ...
@@ -104,66 +106,61 @@ class NoBillOnFileWorkflow:
 
         self._run_step(
             "1",
-            "Opening bill/client selection",
-            lambda: self.driver.click(CONTROLS_BY_STEP["1"]),
+            "Opening search options",
+            lambda: self.driver.invoke(CONTROLS_BY_STEP["1"]),
         )
         self._run_step(
             "2",
-            "Opening search options",
-            lambda: self.driver.click(CONTROLS_BY_STEP["2"]),
+            "Clearing the search box",
+            lambda: self.driver.clear(CONTROLS_BY_STEP["2"]),
         )
         self._run_step(
             "3",
-            "Clearing the search box",
-            lambda: self.driver.clear(CONTROLS_BY_STEP["3"]),
+            "Opening Advanced Search",
+            lambda: self.driver.click(CONTROLS_BY_STEP["3"]),
         )
         self._run_step(
             "4",
-            "Opening Advanced Search",
-            lambda: self.driver.click(CONTROLS_BY_STEP["4"]),
+            "Entering Claim ID",
+            lambda: self.driver.input_text(
+                CONTROLS_BY_STEP["4"], claim_id
+            ),
         )
         self._run_step(
             "5",
-            "Entering Claim ID",
+            "Entering DOS From",
             lambda: self.driver.input_text(
-                CONTROLS_BY_STEP["5"], claim_id
+                CONTROLS_BY_STEP["5"], dos_from
             ),
         )
         self._run_step(
             "6",
-            "Entering DOS From",
-            lambda: self.driver.input_text(
-                CONTROLS_BY_STEP["6"], dos_from
-            ),
-        )
-        self._run_step(
-            "7",
             "Submitting search criteria",
-            lambda: self.driver.click(CONTROLS_BY_STEP["7"]),
+            lambda: self.driver.click(CONTROLS_BY_STEP["6"]),
         )
         self._run_step(
-            "8.1",
+            "7.1",
             "Opening claim details",
-            lambda: self.driver.click(CONTROLS_BY_STEP["8.1"]),
+            lambda: self.driver.click(CONTROLS_BY_STEP["7.1"]),
         )
 
         self._check_cancelled()
-        self.progress("8.2", "Reading Patient Account")
+        self.progress("7.2", "Reading Patient Account")
         patient_account = extract_patient_account(
-            self.driver.read_text(CONTROLS_BY_STEP["8.2"])
+            self.driver.read_text(CONTROLS_BY_STEP["7.2"])
         )
 
         self._check_cancelled()
-        self.progress("8.3", "Reading and confirming Amount")
+        self.progress("7.3", "Reading and confirming Amount")
         amount = extract_amount(
-            self.driver.read_text(CONTROLS_BY_STEP["8.3"])
+            self.driver.read_text(CONTROLS_BY_STEP["7.3"])
         )
-        self.driver.click(CONTROLS_BY_STEP["8.3"])
+        self.driver.click(CONTROLS_BY_STEP["7.3"])
 
         self._run_step(
-            "9",
+            "8",
             "Closing the result window",
-            lambda: self.driver.click(CONTROLS_BY_STEP["9"]),
+            lambda: self.driver.click(CONTROLS_BY_STEP["8"]),
         )
 
         self.progress("complete", "Workflow complete")
@@ -172,4 +169,3 @@ class NoBillOnFileWorkflow:
             amount=amount,
             outcome=OUTCOME_MESSAGE,
         )
-

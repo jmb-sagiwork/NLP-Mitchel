@@ -7,7 +7,7 @@ from smartadvisor_automation.diagnostics import DiagnosticTrace
 from smartadvisor_automation.models import ControlSpec, ProbeResult
 from smartadvisor_automation.selectors import (
     NO_BILL_ON_FILE_CONTROLS,
-    OPEN_BILL_CLIENT_AUTOMATION_ID,
+    OPEN_BILL_ACTION_AUTOMATION_ID,
     OPEN_BILL_FRAME_AUTOMATION_ID,
     OPEN_BILL_FRAME_NAME,
     OPEN_BILL_WINDOW_AUTOMATION_ID,
@@ -517,27 +517,27 @@ def _strict_uia_open_bill_frame(
     frame_info = frame_matches[0]
 
     frame_children = _direct_element_children(frame_info)
-    client_matches = [
+    action_matches = [
         info
         for info in frame_children
         if (
             str(getattr(info, "automation_id", "") or "")
-            == OPEN_BILL_CLIENT_AUTOMATION_ID
+            == OPEN_BILL_ACTION_AUTOMATION_ID
             and str(getattr(info, "control_type", "") or "")
-            == "ComboBox"
+            == "Button"
             and str(getattr(info, "class_name", "") or "").startswith(
                 SMARTADVISOR_WINDOW_CLASS_PREFIX
             )
         )
     ]
-    if len(client_matches) != 1:
+    if len(action_matches) != 1:
         if trace:
             trace.record(
                 stage,
                 "uia",
-                "client_not_uniquely_matched",
+                "action_not_uniquely_matched",
                 frame_direct_child_count=len(frame_children),
-                client_match_count=len(client_matches),
+                action_match_count=len(action_matches),
             )
         return None
 
@@ -814,7 +814,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.3.1",
+        "utility_version": "0.3.2",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

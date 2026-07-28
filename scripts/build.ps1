@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $packageName = "SmartAdvisorAutomation"
-$version = "0.3.1"
+$version = "0.3.2"
 $architecture = python -c "import struct; print('x64' if struct.calcsize('P') == 8 else 'x86')"
 $artifactName = "$packageName-$version-$architecture"
 $extractorName = "SmartAdvisorObjectExtractor"

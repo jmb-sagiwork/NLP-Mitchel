@@ -20,6 +20,9 @@ class FakeDriver:
         self.calls.append(("attach", landmark.step))
         return "uia"
 
+    def invoke(self, spec) -> None:
+        self.calls.append(("invoke", spec.step))
+
     def click(self, spec) -> None:
         self.calls.append(("click", spec.step))
 
@@ -31,7 +34,7 @@ class FakeDriver:
 
     def read_text(self, spec) -> str:
         self.calls.append(("read", spec.step))
-        if spec.step == "8.2":
+        if spec.step == "7.2":
             return "Patient Account - ACCOUNT-TEST"
         return "Amount - $10.00"
 
@@ -44,18 +47,17 @@ def test_workflow_executes_supplied_steps_in_order() -> None:
 
     assert driver.calls == [
         ("attach", "1"),
-        ("click", "1"),
-        ("click", "2"),
-        ("clear", "3"),
-        ("click", "4"),
-        ("input", "5", "CASE-1"),
-        ("input", "6", "01/02/2025"),
-        ("click", "7"),
-        ("click", "8.1"),
-        ("read", "8.2"),
-        ("read", "8.3"),
-        ("click", "8.3"),
-        ("click", "9"),
+        ("invoke", "1"),
+        ("clear", "2"),
+        ("click", "3"),
+        ("input", "4", "CASE-1"),
+        ("input", "5", "01/02/2025"),
+        ("click", "6"),
+        ("click", "7.1"),
+        ("read", "7.2"),
+        ("read", "7.3"),
+        ("click", "7.3"),
+        ("click", "8"),
     ]
     assert result.patient_account == "ACCOUNT-TEST"
     assert result.amount == "$10.00"
@@ -105,4 +107,3 @@ def test_result_value_extraction() -> None:
         == "ACCOUNT-TEST"
     )
     assert extract_amount("Billed Amount: $1,234.56") == "$1,234.56"
-

@@ -6,17 +6,16 @@ excluded from source control.
 
 | Step | Automation ID | Purpose | Intended action |
 | --- | --- | --- | --- |
-| 1 | `cboClient` | Open bill/client selection | Click |
-| 2 | `_cmdSearch_1` | Open additional search options | Click |
-| 3 | `263892` | Search/input box | Focus and clear |
-| 4 | `btnAdvacedSearch` | Open Advanced Search | Click |
-| 5 | `67390` | Claim ID | Enter user-provided value |
-| 6 | `67512` | DOS From | Enter user-provided date |
-| 7 | `cmdOK` | Submit search criteria | Click |
-| 8.1 | `263910` | Verify/select claim details | Click |
-| 8.2 | `198916` | Patient Account | Extract displayed value |
-| 8.3 | `329468` | Amount | Extract displayed value, then click |
-| 9 | `1901400` | Close result/message window | Click |
+| 1 | `_cmdSearch_1` | Open additional search options | UIA Invoke |
+| 2 | `263892` | Search/input box | Focus and clear |
+| 3 | `btnAdvacedSearch` | Open Advanced Search | Click |
+| 4 | `67390` | Claim ID | Enter user-provided value |
+| 5 | `67512` | DOS From | Enter user-provided date |
+| 6 | `cmdOK` | Submit search criteria | Click |
+| 7.1 | `263910` | Verify/select claim details | Click |
+| 7.2 | `198916` | Patient Account | Extract displayed value |
+| 7.3 | `329468` | Amount | Extract displayed value, then click |
+| 8 | `1901400` | Close result/message window | Click |
 
 ## Implemented interpretation
 
