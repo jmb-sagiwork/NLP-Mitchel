@@ -1,0 +1,402 @@
+Dialog - 'Bill Search'    (L945, T355, R1749, B955)
+['Bill SearchDialog', 'Dialog', 'Bill Search']
+child_window(title="Bill Search", auto_id="frmBillSearch", control_type="Window")
+   |
+   | Button - 'Bill &Details'    (L1660, T664, R1730, B687)
+   | ['Button', 'Bill &DetailsButton', 'Bill &Details', 'Button0', 'Button1']
+   | child_window(title="Bill &Details", auto_id="cmdDetails", control_type="Button")
+   |
+   | Button - 'Clear All'    (L1661, T492, R1725, B515)
+   | ['Clear All', 'Button2', 'Clear AllButton']
+   | child_window(title="Clear All", auto_id="cmdClear", control_type="Button")
+   |
+   | Button - '&Help'    (L1660, T461, R1725, B486)
+   | ['Button3', '&Help', '&HelpButton']
+   | child_window(title="&Help", auto_id="cmdHelp", control_type="Button")
+   |
+   | Button - '&Cancel'    (L1660, T430, R1725, B455)
+   | ['Button4', '&Cancel', '&CancelButton']
+   | child_window(title="&Cancel", auto_id="cmdCancel", control_type="Button")
+   |
+   | Button - '&OK'    (L1660, T399, R1725, B424)
+   | ['Button5', '&OK', '&OKButton']
+   | child_window(title="&OK", auto_id="cmdOK", control_type="Button")
+   |
+   | GroupBox - 'Bill Records'    (L953, T392, R1654, B942)
+   | ['Bill RecordsGroupBox', 'GroupBox', 'Bill Records']
+   | child_window(title="Bill Records", auto_id="Frame1", control_type="Group")
+   |    |
+   |    | Pane - ''    (L957, T664, R1650, B918)
+   |    | ['Pane', 'Partner EDI ExchangePane', 'Pane0', 'Pane1', 'Partner EDI ExchangePane0', 'Partner EDI ExchangePane1']
+   |    | child_window(auto_id="fpSearchResult", control_type="Pane")
+   |    |    |
+   |    |    | Pane - ''    (L959, T899, R1631, B916)
+   |    |    | ['Pane2', 'Partner EDI ExchangePane2']
+   |    |    | child_window(auto_id="329492", control_type="Pane")
+   |    |    |
+   |    |    | Pane - ''    (L1631, T666, R1648, B899)
+   |    |    | ['Carrier Sequence #Pane', 'Pane3']
+   |    |    | child_window(auto_id="591576", control_type="Pane")
+   |    |
+   |    | Button - 'Advanced Search '    (L1493, T424, R1615, B447)
+   |    | ['Button6', 'Advanced Search ', 'Advanced Search Button']
+   |    | child_window(title="Advanced Search ", auto_id="btnAdvacedSearch", control_type="Button")
+   |    |
+   |    | Pane - ''    (L956, T448, R1632, B658)
+   |    | ['Pane4', 'Claim SysPane']
+   |    | child_window(auto_id="pnlAdvanceControls", control_type="Pane")
+   |    |    |
+   |    |    | Edit - ''    (L1152, T504, R1204, B524)
+   |    |    | ['Prov ZIPEdit', 'Edit', 'Prov ZIPEdit0', 'Prov ZIPEdit1', 'Edit0', 'Edit1']
+   |    |    | child_window(auto_id="txtProvZp", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1155, T507, R1201, B520)
+   |    |    |    | ['Prov ZIPEdit2', 'Edit2']
+   |    |    |    | child_window(auto_id="394944", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1212, T467, R1373, B487)
+   |    |    | ['Claim IDEdit', 'Edit3', 'Claim IDEdit0', 'Claim IDEdit1']
+   |    |    | child_window(auto_id="txtClaimID", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1215, T470, R1370, B483)
+   |    |    |    | ['Claim IDEdit2', 'Edit4']
+   |    |    |    | child_window(auto_id="657076", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Claim Sys'    (L963, T451, R1017, B466)
+   |    |    | ['Claim SysStatic', 'Claim Sys', 'Static', 'Static0', 'Static1']
+   |    |    | child_window(title="Claim Sys", auto_id="lblClaimSys", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L966, T467, R1015, B487)
+   |    |    | ['Claim SysEdit', 'Edit5', 'Claim SysEdit0', 'Claim SysEdit1']
+   |    |    | child_window(auto_id="txtClaimSys", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L969, T470, R1012, B483)
+   |    |    |    | ['Claim SysEdit2', 'Edit6']
+   |    |    |    | child_window(auto_id="1508464", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1212, T587, R1373, B607)
+   |    |    | ['Edit7', 'eHub IDEdit', 'eHub IDEdit0', 'eHub IDEdit1']
+   |    |    | child_window(auto_id="txteBillHubID", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1215, T590, R1370, B603)
+   |    |    |    | ['Edit8', 'eHub IDEdit2']
+   |    |    |    | child_window(auto_id="1377294", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Bill UDF Value'    (L1079, T570, R1156, B585)
+   |    |    | ['Bill UDF ValueStatic', 'Static2', 'Bill UDF Value']
+   |    |    | child_window(title="Bill UDF Value", auto_id="lblValue", control_type="Text")
+   |    |    |
+   |    |    | Static - 'Claimant'    (L1021, T451, R1070, B466)
+   |    |    | ['ClaimantStatic', 'Static3', 'Claimant']
+   |    |    | child_window(title="Claimant", auto_id="lblClaimant", control_type="Text")
+   |    |    |
+   |    |    | Button - 'Claim Search'    (L1527, T465, R1626, B490)
+   |    |    | ['Button7', 'Claim SearchButton', 'Claim Search']
+   |    |    | child_window(title="Claim Search", auto_id="cmdClaimSearch", control_type="Button")
+   |    |    |
+   |    |    | Button - 'Provider Search'    (L1527, T500, R1626, B525)
+   |    |    | ['Button8', 'Provider Search', 'Provider SearchButton']
+   |    |    | child_window(title="Provider Search", auto_id="cmdProviderSearch", control_type="Button")
+   |    |    |
+   |    |    | Edit - ''    (L1024, T467, R1205, B487)
+   |    |    | ['Edit9', 'ClaimantEdit', 'ClaimantEdit0', 'ClaimantEdit1']
+   |    |    | child_window(auto_id="txtClaimant", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1027, T470, R1202, B483)
+   |    |    |    | ['Edit10', 'ClaimantEdit2']
+   |    |    |    | child_window(auto_id="329362", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Claim ID'    (L1209, T451, R1257, B466)
+   |    |    | ['Claim ID', 'Static4', 'Claim IDStatic']
+   |    |    | child_window(title="Claim ID", auto_id="lblClaimID", control_type="Text")
+   |    |    |
+   |    |    | Static - 'SSN'    (L1381, T451, R1412, B466)
+   |    |    | ['SSNStatic', 'SSN', 'Static5']
+   |    |    | child_window(title="SSN", auto_id="lblSSN", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1378, T467, R1520, B487)
+   |    |    | ['SSNEdit', 'Edit11', 'SSNEdit0', 'SSNEdit1']
+   |    |    | child_window(auto_id="txtSSN", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1381, T470, R1517, B483)
+   |    |    |    | ['SSNEdit2', 'Edit12']
+   |    |    |    | child_window(auto_id="1967782", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1212, T504, R1276, B524)
+   |    |    | ['Edit13', 'Prov TINEdit', 'Prov TINEdit0', 'Prov TINEdit1']
+   |    |    | child_window(auto_id="txtProvTIN", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1215, T507, R1273, B520)
+   |    |    |    | ['Edit14', 'Prov TINEdit2']
+   |    |    |    | child_window(auto_id="329690", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1212, T544, R1373, B564)
+   |    |    | ['Edit15', 'DCNEdit', 'DCNEdit0', 'DCNEdit1']
+   |    |    | child_window(auto_id="txtDCN", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1215, T547, R1370, B560)
+   |    |    |    | ['Edit16', 'DCNEdit2']
+   |    |    |    | child_window(auto_id="198606", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Prov ZIP'    (L1151, T487, R1202, B502)
+   |    |    | ['Prov ZIPStatic', 'Prov ZIP', 'Static6']
+   |    |    | child_window(title="Prov ZIP", auto_id="lblProvZip", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1379, T588, R1573, B608)
+   |    |    | ['Prov ZIPEdit3', 'Carrier Sequence #Edit', 'Edit17', 'Carrier Sequence #Edit0', 'Carrier Sequence #Edit1']
+   |    |    | child_window(auto_id="txtCarrSeq", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1382, T591, R1570, B604)
+   |    |    |    | ['Carrier Sequence #Edit2', 'Edit18']
+   |    |    |    | child_window(auto_id="919488", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Carrier Sequence #'    (L1376, T570, R1477, B585)
+   |    |    | ['Carrier Sequence #Static', 'Carrier Sequence #', 'Static7']
+   |    |    | child_window(title="Carrier Sequence #", auto_id="lblCarrSeq", control_type="Text")
+   |    |    |
+   |    |    | ComboBox - 'cboEDIExchg'    (L966, T635, R1204, B658)
+   |    |    | ['cboEDIExchgComboBox', 'cboEDIExchg', 'ComboBox', 'ComboBox0', 'ComboBox1']
+   |    |    | child_window(title="cboEDIExchg", auto_id="cboEDIExchg", control_type="ComboBox")
+   |    |    |
+   |    |    | Static - 'Partner EDI Exchange'    (L962, T617, R1077, B632)
+   |    |    | ['Partner EDI Exchange', 'Partner EDI ExchangeStatic', 'Static8']
+   |    |    | child_window(title="Partner EDI Exchange", auto_id="lblCarrSeq", control_type="Text")
+   |    |    |
+   |    |    | Static - 'Partner Transaction ID'    (L1208, T617, R1324, B632)
+   |    |    | ['Partner Transaction IDStatic', 'Partner Transaction ID', 'Static9']
+   |    |    | child_window(title="Partner Transaction ID", auto_id="lblPartTransID", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1212, T635, R1373, B655)
+   |    |    | ['Partner Transaction IDEdit', 'Edit19', 'Partner Transaction IDEdit0', 'Partner Transaction IDEdit1']
+   |    |    | child_window(auto_id="txtPartTransID", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1215, T638, R1370, B651)
+   |    |    |    | ['Partner Transaction IDEdit2', 'Edit20']
+   |    |    |    | child_window(auto_id="264098", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Prov TIN'    (L1209, T487, R1261, B502)
+   |    |    | ['Prov TIN', 'Static10', 'Prov TINStatic']
+   |    |    | child_window(title="Prov TIN", auto_id="lblProvTIN", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1082, T587, R1205, B607)
+   |    |    | ['Bill UDF ValueEdit', 'Edit21', 'Bill UDF ValueEdit0', 'Bill UDF ValueEdit1']
+   |    |    | child_window(auto_id="txtBillUDF", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1085, T590, R1202, B603)
+   |    |    |    | ['Bill UDF ValueEdit2', 'Edit22']
+   |    |    |    | child_window(auto_id="329682", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Rendering NPI'    (L1376, T487, R1455, B502)
+   |    |    | ['Rendering NPI', 'Rendering NPIStatic', 'Static11']
+   |    |    | child_window(title="Rendering NPI", auto_id="lblRenderingNPI", control_type="Text")
+   |    |    |
+   |    |    | Static - 'eHub ID'    (L1208, T570, R1257, B585)
+   |    |    | ['eHub IDStatic', 'eHub ID', 'Static12']
+   |    |    | child_window(title="eHub ID", auto_id="lbleBillHubID", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1379, T504, R1448, B524)
+   |    |    | ['Rendering NPIEdit', 'Edit23', 'Rendering NPIEdit0', 'Rendering NPIEdit1']
+   |    |    | child_window(auto_id="txtRenderingNPI", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1382, T507, R1445, B520)
+   |    |    |    | ['Rendering NPIEdit2', 'Edit24']
+   |    |    |    | child_window(auto_id="395232", control_type="Edit")
+   |    |    |
+   |    |    | ComboBox - 'cboBillUDF'    (L964, T587, R1076, B610)
+   |    |    | ['cboBillUDFComboBox', 'ComboBox2', 'cboBillUDF']
+   |    |    | child_window(title="cboBillUDF", auto_id="cboBillUDF", control_type="ComboBox")
+   |    |    |
+   |    |    | Static - 'Provider'    (L961, T487, R1009, B502)
+   |    |    | ['Provider', 'Static13', 'ProviderStatic']
+   |    |    | child_window(title="Provider", auto_id="lblProvider", control_type="Text")
+   |    |    |
+   |    |    | Static - 'Bill UDF '    (L962, T572, R1012, B587)
+   |    |    | ['Bill UDF Static', 'Bill UDF ', 'Static14']
+   |    |    | child_window(title="Bill UDF ", auto_id="lblBillUDF", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L964, T504, R1145, B524)
+   |    |    | ['ProviderEdit', 'Edit25', 'ProviderEdit0', 'ProviderEdit1']
+   |    |    | child_window(auto_id="txtProvider", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L967, T507, R1142, B520)
+   |    |    |    | ['ProviderEdit2', 'Edit26']
+   |    |    |    | child_window(auto_id="198452", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Facility NPI'    (L1276, T487, R1338, B502)
+   |    |    | ['Facility NPIStatic', 'Static15', 'Facility NPI']
+   |    |    | child_window(title="Facility NPI", auto_id="lblFacilityNPI", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1279, T504, R1373, B524)
+   |    |    | ['Facility NPIEdit', 'Edit27', 'Facility NPIEdit0', 'Facility NPIEdit1']
+   |    |    | child_window(auto_id="txtFacilityNPI", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1282, T507, R1370, B520)
+   |    |    |    | ['Facility NPIEdit2', 'Edit28']
+   |    |    |    | child_window(auto_id="198460", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'External ID'    (L1459, T487, R1520, B502)
+   |    |    | ['External IDStatic', 'Static16', 'External ID']
+   |    |    | child_window(title="External ID", auto_id="lblExternalID", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1454, T504, R1520, B524)
+   |    |    | ['External IDEdit', 'Edit29', 'External IDEdit0', 'External IDEdit1']
+   |    |    | child_window(auto_id="txtExternalID", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1457, T507, R1517, B520)
+   |    |    |    | ['External IDEdit2', 'Edit30']
+   |    |    |    | child_window(auto_id="198464", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'Patient Account #'    (L1376, T527, R1471, B542)
+   |    |    | ['Patient Account #Static', 'Static17', 'Patient Account #']
+   |    |    | child_window(title="Patient Account #", auto_id="lblPatientAccount", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1379, T544, R1573, B564)
+   |    |    | ['Patient Account #Edit', 'Edit31', 'Patient Account #Edit0', 'Patient Account #Edit1']
+   |    |    | child_window(auto_id="txtPatientAccount", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1382, T547, R1570, B560)
+   |    |    |    | ['Patient Account #Edit2', 'Edit32']
+   |    |    |    | child_window(auto_id="198466", control_type="Edit")
+   |    |    |
+   |    |    | Static - '# Lines'    (L995, T527, R1039, B542)
+   |    |    | ['# Lines', 'Static18', '# LinesStatic']
+   |    |    | child_window(title="# Lines", auto_id="Label6", control_type="Text")
+   |    |    |
+   |    |    | CheckBox - 'Show only bills eligible for re-eval'    (L1379, T635, R1567, B653)
+   |    |    | ['Show only bills eligible for re-evalCheckBox', 'Show only bills eligible for re-eval', 'CheckBox']
+   |    |    | child_window(title="Show only bills eligible for re-eval", auto_id="chkEligibleForReeval", control_type="CheckBox")
+   |    |    |
+   |    |    | Edit - ''    (L998, T544, R1047, B564)
+   |    |    | ['# LinesEdit', 'Edit33', '# LinesEdit0', '# LinesEdit1']
+   |    |    | child_window(auto_id="txtNumLines", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1001, T547, R1044, B560)
+   |    |    |    | ['# LinesEdit2', 'Edit34']
+   |    |    |    | child_window(auto_id="198474", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'DCN'    (L1209, T527, R1241, B542)
+   |    |    | ['DCNStatic', 'Static19', 'DCN']
+   |    |    | child_window(title="DCN", auto_id="Label4", control_type="Text")
+   |    |    |
+   |    |    | Static - 'DOS From'    (L1056, T527, R1114, B542)
+   |    |    | ['Static20', 'DOS From', 'DOS FromStatic']
+   |    |    | child_window(title="DOS From", auto_id="Label5", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L1131, T544, R1203, B564)
+   |    |    | ['DOS ToEdit', 'DOS FromEdit', 'Edit35', 'DOS ToEdit0', 'DOS ToEdit1', 'DOS FromEdit0', 'DOS FromEdit1']
+   |    |    | child_window(auto_id="txtDOSTo", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1134, T547, R1200, B560)
+   |    |    |    | ['DOS ToEdit2', 'Edit36']
+   |    |    |    | child_window(auto_id="198488", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1059, T544, R1127, B564)
+   |    |    | ['DOS FromEdit2', 'Edit37']
+   |    |    | child_window(auto_id="txtDOSFrom", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L1062, T547, R1124, B560)
+   |    |    |    | ['DOS FromEdit3', 'Edit38']
+   |    |    |    | child_window(auto_id="198486", control_type="Edit")
+   |    |    |
+   |    |    | Static - 'DOS To'    (L1128, T527, R1176, B542)
+   |    |    | ['DOS To', 'Static21', 'DOS ToStatic']
+   |    |    | child_window(title="DOS To", auto_id="Label2", control_type="Text")
+   |    |    |
+   |    |    | Static - 'TOB'    (L961, T527, R992, B542)
+   |    |    | ['TOB', 'Static22', 'TOBStatic']
+   |    |    | child_window(title="TOB", auto_id="Label3", control_type="Text")
+   |    |    |
+   |    |    | Edit - ''    (L964, T544, R990, B564)
+   |    |    | ['TOBEdit', 'Edit39', 'TOBEdit0', 'TOBEdit1']
+   |    |    | child_window(auto_id="txtTOB", control_type="Edit")
+   |    |    |    |
+   |    |    |    | Edit - ''    (L967, T547, R987, B560)
+   |    |    |    | ['TOBEdit2', 'Edit40']
+   |    |    |    | child_window(auto_id="198498", control_type="Edit")
+   |    |
+   |    | Edit - ''    (L1210, T425, R1272, B445)
+   |    | ['Edit41', 'Bill No.Edit', 'Bill No.Edit0', 'Bill No.Edit1']
+   |    | child_window(auto_id="txtBillNo", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1213, T428, R1269, B441)
+   |    |    | ['Edit42', 'Bill No.Edit2']
+   |    |    | child_window(auto_id="2098774", control_type="Edit")
+   |    |
+   |    | Edit - ''    (L1405, T425, R1477, B445)
+   |    | ['Review DateEdit', 'Edit43', 'Review DateEdit0', 'Review DateEdit1']
+   |    | child_window(auto_id="txtReviewDate", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1408, T428, R1474, B441)
+   |    |    | ['Review DateEdit2', 'Edit44']
+   |    |    | child_window(auto_id="394900", control_type="Edit")
+   |    |
+   |    | Static - 'The number of records returned exceeds the maximum of 500.  Please refine the search filters to return fewer records.'    (L965, T920, R1642, B935)
+   |    | ['The number of records returned exceeds the maximum of 500.  Please refine the search filters to return fewer records.', 'The number of records returned exceeds the maximum of 500.  Please refine the search filters to return fewer records.Static', 'Static23']
+   |    | child_window(title="The number of records returned exceeds the maximum of 500.  Please refine the search filters to return fewer records.", auto_id="lblNotifyWarning", control_type="Text")
+   |    |
+   |    | Static - 'Review Date'    (L1403, T407, R1474, B422)
+   |    | ['Review DateStatic', 'Review Date', 'Static24']
+   |    | child_window(title="Review Date", auto_id="lblReviewDate", control_type="Text")
+   |    |
+   |    | Edit - ''    (L1343, T425, R1401, B445)
+   |    | ['Mod UserEdit', 'Edit45', 'Mod UserEdit0', 'Mod UserEdit1']
+   |    | child_window(auto_id="txtModUser", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1346, T428, R1398, B441)
+   |    |    | ['Mod UserEdit2', 'Edit46']
+   |    |    | child_window(auto_id="460572", control_type="Edit")
+   |    |
+   |    | Static - 'Mod User'    (L1342, T407, R1397, B422)
+   |    | ['Mod User', 'Static25', 'Mod UserStatic']
+   |    | child_window(title="Mod User", auto_id="lblModUser", control_type="Text")
+   |    |
+   |    | Edit - ''    (L1276, T425, R1339, B445)
+   |    | ['Edit47', 'Create UserEdit', 'Create UserEdit0', 'Create UserEdit1']
+   |    | child_window(auto_id="txtCreateUser", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1279, T428, R1336, B441)
+   |    |    | ['Edit48', 'Create UserEdit2']
+   |    |    | child_window(auto_id="2622660", control_type="Edit")
+   |    |
+   |    | Static - 'Create User'    (L1275, T407, R1340, B422)
+   |    | ['Create User', 'Static26', 'Create UserStatic']
+   |    | child_window(title="Create User", auto_id="lblCreateUser", control_type="Text")
+   |    |
+   |    | Edit - 'AMNJ'    (L1154, T425, R1204, B445)
+   |    | ['Edit49', 'ClientEdit', 'ClientEdit0', 'ClientEdit1']
+   |    | child_window(title="AMNJ", auto_id="txtClient", control_type="Edit")
+   |    |    |
+   |    |    | Edit - ''    (L1157, T428, R1201, B441)
+   |    |    | ['Edit50', 'ClientEdit2']
+   |    |    | child_window(auto_id="1508390", control_type="Edit")
+   |    |
+   |    | Static - 'Client'    (L1151, T407, R1186, B422)
+   |    | ['Static27', 'ClientStatic', 'Client']
+   |    | child_window(title="Client", auto_id="lblClient", control_type="Text")
+   |    |
+   |    | Static - 'Bill No.'    (L1207, T407, R1249, B422)
+   |    | ['Bill No.Static', 'Static28', 'Bill No.']
+   |    | child_window(title="Bill No.", auto_id="lblBillNo", control_type="Text")
+   |    |
+   |    | ComboBox - 'cboSearch'    (L963, T424, R1144, B447)
+   |    | ['ComboBox3', 'cboSearchComboBox', 'cboSearch']
+   |    | child_window(title="cboSearch", auto_id="cboSearch", control_type="ComboBox")
+   |    |
+   |    | Static - 'Search:'    (L959, T407, R1005, B422)
+   |    | ['Search:', 'Search:Static', 'Static29']
+   |    | child_window(title="Search:", auto_id="lblSearch", control_type="Text")
+   |
+   | TitleBar - ''    (L975, T363, R1741, B386)
+   | ['TitleBar']
+   |    |
+   |    | Menu - 'System'    (L953, T363, R975, B385)
+   |    | ['SystemMenu', 'Menu', 'System', 'System0', 'System1']
+   |    | child_window(title="System", auto_id="MenuBar", control_type="MenuBar")
+   |    |    |
+   |    |    | MenuItem - 'System'    (L953, T363, R975, B385)
+   |    |    | ['MenuItem', 'System2', 'SystemMenuItem']
+   |    |    | child_window(title="System", control_type="MenuItem")
+   |    |
+   |    | Button - 'Close'    (L1718, T362, R1742, B386)
+   |    | ['CloseButton', 'Button9', 'Close']
+   |    | child_window(title="Close", control_type="Button")

@@ -1,0 +1,60 @@
+import pyautogui
+import pytesseract
+from PIL import Image, ImageDraw
+import time
+
+# Configure Tesseract path if needed
+# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+pytesseract.pytesseract.tesseract_cmd = r"E:\RPA\Tesseract\tesseract\tesseract.exe"
+# Define the region where the words al [#202]
+# appear (x, y, width, height)
+GAME_REGION = (480, 150, 950, 700)   # adjust to your game screen
+# region = (480, 273, 920, 607)  # adjust coordinates to your target area
+
+
+def capture_text(region):
+    screenshot = pyautogui.screenshot(region=region)
+    text = pytesseract.image_to_string(screenshot)
+    return text.strip(), screenshot
+
+
+def show_debug(screenshot):
+    # Draw a red rectangle around the region for visual confirmation
+    debug_img = screenshot.copy()
+    draw = ImageDraw.Draw(debug_img)
+    draw.rectangle([(0, 0), debug_img.size], outline="red", width=3)
+    debug_img.show()  # opens in default image viewer
+
+
+def type_until_gone(region):
+    last_text = ""
+    while True:
+        text, screenshot = capture_text(region)
+        if text and text == last_text:
+            print(f"Typing again: {text}")
+            pyautogui.typewrite(text, interval=0.01)
+            time.sleep(0.1)
+            pyautogui.typewrite(text, interval=0.01)
+        elif text and text != last_text:
+            print(f"New word detected: {text}")
+            pyautogui.typewrite(text, interval=0.01)
+            time.sleep(0.1)
+            pyautogui.typewrite(text, interval=0.01)
+            last_text = text
+        else:
+            last_text = ""
+        # time.sleep(0.2)
+
+
+def main():
+    print("Debug mode: showing region overlay...")
+    _, screenshot = capture_text(GAME_REGION)
+    show_debug(screenshot)  # show the region with a rectangle
+
+    print("Starting speed typing bot... Press Ctrl+C to stop.")
+    time.sleep(2)
+    type_until_gone(GAME_REGION)
+
+
+if __name__ == "__main__":
+    main()
