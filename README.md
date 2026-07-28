@@ -40,6 +40,12 @@ SmartAdvisor process and selects exact UIA `AutomationId=frmBillOpen`. It then
 walks direct UIA children to `AutomationId=Frame1` and verifies the direct
 `AutomationId=cboClient` ComboBox before attaching. HWND values remain dynamic.
 
+When Open Bill is not already visible, version 0.3.1 finds
+`bilMain` → `Toolbar1` → `_Toolbar1_Button2` through UIA and invokes the
+button's legacy IAccessible default action. This launch path does not move the
+mouse or send keyboard input. The strict `frmBillOpen` hierarchy check still
+has to pass before the workflow continues.
+
 ## Object extractor
 
 Use `SmartAdvisorObjectExtractor-0.1.0-x86.exe` when the automation cannot
@@ -108,8 +114,8 @@ Before running:
 
 1. Open Citrix.
 2. Sign in to SmartAdvisor manually.
-3. Leave the **Open Bill** window on screen with the
-   **Enter Bill To Edit** group and `cboClient` available.
+3. Leave the SmartAdvisor main window visible. Open Bill may already be open;
+   otherwise the automation attempts the keyless accessible action.
 4. Start the automation inside the same Citrix session.
 5. Enter Claim ID and DOS From.
 6. Select **Run workflow**.
@@ -127,8 +133,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.3.0-x86.zip
-release\SmartAdvisorAutomation-0.3.0-x86.exe
+dist\SmartAdvisorAutomation-0.3.1-x86.zip
+release\SmartAdvisorAutomation-0.3.1-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 release\SmartAdvisorControlPicker-0.2.0-x86.exe
 release\SmartAdvisorActionRecorder-0.1.0-x86.exe
