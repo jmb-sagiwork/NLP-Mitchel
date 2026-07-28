@@ -103,18 +103,22 @@ def test_attach_resolves_landmark_only_inside_open_bill_frame(
     assert driver.resolve(CONTROLS_BY_STEP["1"], timeout=0.1) is landmark
 
     search_button = SimpleNamespace(
-        element_info=SimpleNamespace(automation_id="263892"),
+        element_info=SimpleNamespace(automation_id="394450"),
         is_visible=lambda: True,
         is_enabled=lambda: True,
     )
-    later_window = SimpleNamespace(
-        element_info=SimpleNamespace(automation_id=""),
+    bill_records = SimpleNamespace(
+        element_info=SimpleNamespace(automation_id="Frame1"),
         descendants=lambda: [search_button],
     )
     monkeypatch.setattr(
         driver,
         "_windows_for_process",
-        lambda: [later_window],
+        lambda: [SimpleNamespace()],
+    )
+    monkeypatch.setattr(
+        "smartadvisor_automation.driver.find_bill_search_frame",
+        lambda _backend, _roots: bill_records,
     )
 
     assert (
@@ -322,3 +326,44 @@ def test_click_with_invoke_fallback_invokes_after_click_error(
     )
 
     assert calls == ["focus", "click", "invoke"]
+
+
+def test_clear_uses_edit_value_pattern(monkeypatch) -> None:
+    calls: list[str] = []
+    element = SimpleNamespace(
+        set_edit_text=lambda value: calls.append(f"value:{value}"),
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.clear(CONTROLS_BY_STEP["2"])
+
+    assert calls == ["value:"]
+
+
+def test_clear_falls_back_to_keyboard_input(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fail_value(_value: str) -> None:
+        calls.append("value_failed")
+        raise RuntimeError("ValuePattern failed")
+
+    element = SimpleNamespace(
+        set_edit_text=fail_value,
+        set_focus=lambda: calls.append("focus"),
+        click_input=lambda: calls.append("click"),
+        type_keys=lambda keys, **kwargs: calls.append(
+            f"keys:{keys}:{kwargs['set_foreground']}"
+        ),
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.clear(CONTROLS_BY_STEP["2"])
+
+    assert calls == [
+        "value_failed",
+        "focus",
+        "click",
+        "keys:^a{BACKSPACE}:True",
+    ]

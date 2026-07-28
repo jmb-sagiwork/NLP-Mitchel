@@ -6,6 +6,10 @@ from typing import Any, Iterable
 from smartadvisor_automation.diagnostics import DiagnosticTrace
 from smartadvisor_automation.models import ControlSpec, ProbeResult
 from smartadvisor_automation.selectors import (
+    BILL_SEARCH_FRAME_AUTOMATION_ID,
+    BILL_SEARCH_FRAME_NAME,
+    BILL_SEARCH_WINDOW_AUTOMATION_ID,
+    BILL_SEARCH_WINDOW_TITLE,
     NO_BILL_ON_FILE_CONTROLS,
     OPEN_BILL_ACTION_AUTOMATION_ID,
     OPEN_BILL_FRAME_AUTOMATION_ID,
@@ -223,6 +227,20 @@ def is_open_bill_frame_identity(
     return (
         name.strip().casefold() == OPEN_BILL_FRAME_NAME.casefold()
         and automation_id == OPEN_BILL_FRAME_AUTOMATION_ID
+        and class_name.startswith(SMARTADVISOR_WINDOW_CLASS_PREFIX)
+    )
+
+
+def is_bill_search_frame_identity(
+    name: str,
+    automation_id: str,
+    class_name: str,
+) -> bool:
+    """Match the stable UIA identity supplied for Bill Records."""
+
+    return (
+        name.strip().casefold() == BILL_SEARCH_FRAME_NAME.casefold()
+        and automation_id == BILL_SEARCH_FRAME_AUTOMATION_ID
         and class_name.startswith(SMARTADVISOR_WINDOW_CLASS_PREFIX)
     )
 
@@ -612,6 +630,60 @@ def find_direct_uia_control(
         return None
 
 
+def find_bill_search_frame(
+    backend: str,
+    roots: Iterable[Any],
+) -> Any | None:
+    """Resolve frmBillSearch -> Frame1/Bill Records from visible roots."""
+
+    if backend != "uia":
+        return None
+
+    bill_search_matches: list[Any] = []
+    for root in roots:
+        candidates = [root]
+        try:
+            candidates.extend(root.descendants())
+        except Exception:
+            pass
+
+        for element in candidates:
+            info = getattr(element, "element_info", None)
+            if info is None:
+                continue
+            if (
+                str(getattr(info, "automation_id", "") or "")
+                == BILL_SEARCH_WINDOW_AUTOMATION_ID
+                and str(getattr(info, "name", "") or "").strip().casefold()
+                == BILL_SEARCH_WINDOW_TITLE.casefold()
+                and str(getattr(info, "control_type", "") or "") == "Window"
+                and str(getattr(info, "class_name", "") or "").startswith(
+                    SMARTADVISOR_WINDOW_CLASS_PREFIX
+                )
+            ):
+                bill_search_matches.append(element)
+
+    if len(bill_search_matches) != 1:
+        return None
+
+    frame = find_direct_uia_control(
+        backend,
+        bill_search_matches[0],
+        BILL_SEARCH_FRAME_AUTOMATION_ID,
+    )
+    if frame is None:
+        return None
+
+    info = getattr(frame, "element_info", None)
+    if info is None or not is_bill_search_frame_identity(
+        _element_name(frame),
+        str(getattr(info, "automation_id", "") or ""),
+        str(getattr(info, "class_name", "") or ""),
+    ):
+        return None
+    return frame
+
+
 def find_open_bill_frame(
     backend: str,
     main_window: Any,
@@ -814,7 +886,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.3.3",
+        "utility_version": "0.3.4",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

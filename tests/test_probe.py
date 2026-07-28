@@ -4,8 +4,10 @@ from types import SimpleNamespace
 from smartadvisor_automation.probe import (
     _native_smartadvisor_handles,
     _preferred_native_handle,
+    find_bill_search_frame,
     find_direct_uia_control,
     find_open_bill_frame,
+    is_bill_search_frame_identity,
     is_open_bill_frame_identity,
     is_smartadvisor_window_identity,
     selector_match_strategy,
@@ -65,6 +67,53 @@ def test_open_bill_frame_identity_matches_supplied_parent() -> None:
         "OtherFrame",
         "WindowsForms10.Window.8.app.0.dynamic_ad1",
     )
+
+
+def test_bill_search_frame_identity_matches_supplied_parent() -> None:
+    assert is_bill_search_frame_identity(
+        "Bill Records",
+        "Frame1",
+        "WindowsForms10.Window.8.app.0.dynamic_ad1",
+    )
+    assert not is_bill_search_frame_identity(
+        "Enter Bill To Edit",
+        "Frame1",
+        "WindowsForms10.Window.8.app.0.dynamic_ad1",
+    )
+
+
+def test_find_bill_search_frame_follows_supplied_hierarchy(
+    monkeypatch,
+) -> None:
+    winforms_class = "WindowsForms10.Window.8.app.0.dynamic_ad1"
+    frame = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="Frame1",
+            class_name=winforms_class,
+            name="Bill Records",
+        ),
+        window_text=lambda: "Bill Records",
+    )
+    bill_search = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="frmBillSearch",
+            class_name=winforms_class,
+            control_type="Window",
+            name="Bill Search",
+        ),
+    )
+    root = SimpleNamespace(descendants=lambda: [bill_search])
+
+    monkeypatch.setattr(
+        "smartadvisor_automation.probe.find_direct_uia_control",
+        lambda _backend, parent, automation_id: (
+            frame
+            if parent is bill_search and automation_id == "Frame1"
+            else None
+        ),
+    )
+
+    assert find_bill_search_frame("uia", [root]) is frame
 
 
 def test_find_open_bill_frame_follows_native_parent_chain(

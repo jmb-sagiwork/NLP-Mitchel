@@ -1,6 +1,9 @@
 import re
 
-from smartadvisor_automation.selectors import NO_BILL_ON_FILE_CONTROLS
+from smartadvisor_automation.selectors import (
+    CONTROLS_BY_STEP,
+    NO_BILL_ON_FILE_CONTROLS,
+)
 
 
 def test_selector_ids_are_unique_and_nonempty() -> None:
@@ -37,6 +40,13 @@ def test_amount_step_extracts_then_clicks() -> None:
     )
 
     assert amount_control.action == "extract_click"
+
+
+def test_claim_control_uses_bill_search_edit() -> None:
+    claim_control = CONTROLS_BY_STEP["4"]
+
+    assert claim_control.automation_id == "197684"
+    assert claim_control.action == "input"
 
 
 def test_selector_definitions_do_not_contain_sample_values() -> None:

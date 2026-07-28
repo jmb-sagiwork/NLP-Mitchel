@@ -8,6 +8,20 @@ OPEN_BILL_WINDOW_AUTOMATION_ID = "frmBillOpen"
 OPEN_BILL_FRAME_AUTOMATION_ID = "Frame1"
 OPEN_BILL_FRAME_NAME = "Enter Bill To Edit"
 OPEN_BILL_ACTION_AUTOMATION_ID = "_cmdSearch_1"
+BILL_SEARCH_WINDOW_TITLE = "Bill Search"
+BILL_SEARCH_WINDOW_AUTOMATION_ID = "frmBillSearch"
+BILL_SEARCH_FRAME_AUTOMATION_ID = "Frame1"
+BILL_SEARCH_FRAME_NAME = "Bill Records"
+BILL_SEARCH_TEXT_AUTOMATION_ID = "394450"
+BILL_SEARCH_ADVANCED_AUTOMATION_ID = "btnAdvacedSearch"
+BILL_SEARCH_CLAIM_AUTOMATION_ID = "197684"
+BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS = frozenset(
+    {
+        BILL_SEARCH_TEXT_AUTOMATION_ID,
+        BILL_SEARCH_ADVANCED_AUTOMATION_ID,
+        BILL_SEARCH_CLAIM_AUTOMATION_ID,
+    }
+)
 
 # Main-window AutomationId, confirmed by the control picker. Window
 # identity still matches on title and class prefix; this is recorded for
@@ -24,19 +38,19 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ),
     ControlSpec(
         step="2",
-        automation_id="263892",
-        label="Search/input box",
+        automation_id=BILL_SEARCH_TEXT_AUTOMATION_ID,
+        label="Bill Search client text",
         action="clear",
     ),
     ControlSpec(
         step="3",
-        automation_id="btnAdvacedSearch",
+        automation_id=BILL_SEARCH_ADVANCED_AUTOMATION_ID,
         label="Advanced Search",
         action="click",
     ),
     ControlSpec(
         step="4",
-        automation_id="67390",
+        automation_id=BILL_SEARCH_CLAIM_AUTOMATION_ID,
         label="Claim ID",
         action="input",
     ),

@@ -9,10 +9,14 @@ from smartadvisor_automation.errors import AutomationError
 from smartadvisor_automation.models import ControlSpec
 from smartadvisor_automation.probe import (
     SUPPORTED_BACKENDS,
+    find_bill_search_frame,
     find_direct_uia_control,
     find_open_bill_frame,
     find_smartadvisor_window,
     matching_elements,
+)
+from smartadvisor_automation.selectors import (
+    BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS,
 )
 
 
@@ -216,6 +220,15 @@ class SmartAdvisorDriver:
         ):
             return self._elements_in_scope(self._landmark_scope)
 
+        if spec.automation_id in BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS:
+            frame = find_bill_search_frame(
+                self.backend or "",
+                self._windows_for_process(),
+            )
+            if frame is None:
+                return []
+            return self._elements_in_scope(frame)
+
         elements: list[Any] = []
         for window in self._windows_for_process():
             elements.extend(self._elements_in_scope(window))
@@ -328,6 +341,12 @@ class SmartAdvisorDriver:
 
     def clear(self, spec: ControlSpec) -> None:
         element = self.resolve(spec)
+        try:
+            element.set_edit_text("")
+            return
+        except Exception:
+            pass
+
         try:
             element.set_focus()
             element.click_input()

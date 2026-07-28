@@ -10,10 +10,10 @@ and Amount, closes the result window, and displays the result in Tkinter.
 
 ## Automated workflow
 
-1. Invoke `_cmdSearch_1`.
-2. Click `263892`, select all text, and clear it.
-3. Click `btnAdvacedSearch`.
-4. Enter Claim ID in `67390`.
+1. Click `_cmdSearch_1`, with UIA InvokePattern as fallback.
+2. In `frmBillSearch` → `Frame1` / `Bill Records`, clear `394450`.
+3. In the same Bill Records group, click `btnAdvacedSearch`.
+4. In the same Bill Records group, enter Claim ID in `197684`.
 5. Enter DOS From in `67512`.
 6. Click `cmdOK`.
 7. Click `263910`.
@@ -41,7 +41,7 @@ walks direct UIA children to `AutomationId=Frame1` and verifies the direct
 `AutomationId=_cmdSearch_1` Button before attaching. HWND values remain
 dynamic.
 
-When Open Bill is not already visible, version 0.3.3 focuses the exact
+When Open Bill is not already visible, version 0.3.4 focuses the exact
 SmartAdvisor main window and sends `Ctrl+O` once. It then waits for
 `frmBillOpen` → `Frame1` → `_cmdSearch_1`, clicks the button with real mouse
 input, and confirms that the next search control appears. UIA InvokePattern is
@@ -134,8 +134,8 @@ workflow.
 The build creates:
 
 ```text
-dist\SmartAdvisorAutomation-0.3.3-x86.zip
-release\SmartAdvisorAutomation-0.3.3-x86.exe
+dist\SmartAdvisorAutomation-0.3.4-x86.zip
+release\SmartAdvisorAutomation-0.3.4-x86.exe
 release\SmartAdvisorObjectExtractor-0.1.0-x86.exe
 release\SmartAdvisorControlPicker-0.2.0-x86.exe
 release\SmartAdvisorActionRecorder-0.1.0-x86.exe
