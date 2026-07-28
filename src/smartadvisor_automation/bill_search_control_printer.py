@@ -5,23 +5,39 @@ from typing import Any
 
 from pywinauto import Application
 
+
 BILL_SEARCH_TITLE = "Bill Search"
 BILL_SEARCH_AUTOMATION_ID = "frmBillSearch"
+MAIN_WINDOW_TITLE = "SmartAdvisor Main System"
 
 
 def print_bill_search_controls(
     application_factory: Callable[..., Any] = Application,
 ) -> None:
-    """Connect to Bill Search and print its complete UIA control tree."""
-
+    """Find the nested Bill Search window and print its complete UIA tree."""
     app = application_factory(backend="uia").connect(
-        title=BILL_SEARCH_TITLE,
+        title=MAIN_WINDOW_TITLE,
     )
-    window = app.window(
-        title=BILL_SEARCH_TITLE,
-        auto_id=BILL_SEARCH_AUTOMATION_ID,
-        control_type="Window",
-    )
+    main = app.window(title=MAIN_WINDOW_TITLE)
+    main.wait("exists visible enabled", timeout=15)
+
+    matches = [
+        element
+        for element in main.descendants(control_type="Window")
+        if element.element_info.name == BILL_SEARCH_TITLE
+        and element.element_info.automation_id == BILL_SEARCH_AUTOMATION_ID
+        and element.element_info.control_type == "Window"
+    ]
+
+    if len(matches) != 1:
+        raise RuntimeError(
+            "Expected exactly one nested Bill Search window "
+            f"(Name={BILL_SEARCH_TITLE!r}, "
+            f"AutomationId={BILL_SEARCH_AUTOMATION_ID!r}, "
+            f"ControlType='Window'); found {len(matches)}."
+        )
+
+    window = matches[0]
     window.wait("exists visible enabled", timeout=15)
     window.print_control_identifiers()
 
@@ -38,8 +54,8 @@ def main() -> int:
     print("=" * 40)
     print("Open the Bill Search window before running this utility.")
     print(
-        "Warning: printed control text can include values currently "
-        "visible in SmartAdvisor."
+        "Warning: printed text may include currently visible values "
+        "in SmartAdvisor."
     )
     print()
 
@@ -52,8 +68,9 @@ def main() -> int:
         print(f"{type(exc).__name__}: {exc}")
         print()
         print(
-            "Expected window: title='Bill Search', "
-            "AutomationId='frmBillSearch', ControlType='Window'."
+            "Expected one nested window below 'SmartAdvisor Main System': "
+            "Name='Bill Search', AutomationId='frmBillSearch', "
+            "ControlType='Window'."
         )
     finally:
         _pause()
