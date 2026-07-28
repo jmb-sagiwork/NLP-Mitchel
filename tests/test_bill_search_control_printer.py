@@ -17,19 +17,14 @@ class FakeElement:
         name: str,
         automation_id: str,
         control_type: str,
+        handle: int = 1234,
     ) -> None:
         self.element_info = SimpleNamespace(
             name=name,
             automation_id=automation_id,
             control_type=control_type,
         )
-        self.calls: list[tuple[object, ...]] = []
-
-    def wait(self, state: str, timeout: int) -> None:
-        self.calls.append(("match_wait", state, timeout))
-
-    def print_control_identifiers(self) -> None:
-        self.calls.append(("print", self.element_info.name))
+        self.handle = handle
 
 
 def element(
@@ -49,31 +44,32 @@ def run_with_descendants(
     descendants: list[FakeElement],
 ) -> list[tuple[object, ...]]:
     calls: list[tuple[object, ...]] = []
+    main = SimpleNamespace(
+        descendants=lambda **kwargs: (
+            calls.append(("descendants", kwargs)) or descendants
+        ),
+    )
+    window = SimpleNamespace(
+        wait=lambda state, timeout: calls.append(
+            ("match_wait", state, timeout)
+        ),
+        print_control_identifiers=lambda: calls.append(("print",)),
+    )
 
-    class FakeApplication:
-        def connect(self, **kwargs):
-            calls.append(("connect", kwargs))
-            return self
+    def window_finder(backend):
+        calls.append(("find_main", backend))
+        return main
 
+    class FakeDesktop:
         def window(self, **kwargs):
             calls.append(("window", kwargs))
-            return SimpleNamespace(
-                wait=lambda state, timeout: calls.append(
-                    ("main_wait", state, timeout)
-                ),
-                descendants=lambda **kwargs: (
-                    calls.append(("descendants", kwargs)) or descendants
-                ),
-            )
+            return window
 
-    def application_factory(**kwargs):
-        calls.append(("factory", kwargs))
-        return FakeApplication()
+    def desktop_factory(**kwargs):
+        calls.append(("desktop", kwargs))
+        return FakeDesktop()
 
-    print_bill_search_controls(application_factory)
-
-    for descendant in descendants:
-        calls.extend(descendant.calls)
+    print_bill_search_controls(window_finder, desktop_factory)
     return calls
 
 
@@ -92,13 +88,12 @@ def test_print_bill_search_controls_finds_exact_nested_window() -> None:
     assert BILL_SEARCH_AUTOMATION_ID == "frmBillSearch"
     assert MAIN_WINDOW_TITLE == "SmartAdvisor Main System"
     assert calls == [
-        ("factory", {"backend": "uia"}),
-        ("connect", {"title": "SmartAdvisor Main System"}),
-        ("window", {"title": "SmartAdvisor Main System"}),
-        ("main_wait", "exists visible enabled", 15),
+        ("find_main", "uia"),
         ("descendants", {"control_type": "Window"}),
+        ("desktop", {"backend": "uia"}),
+        ("window", {"handle": 1234}),
         ("match_wait", "exists visible enabled", 15),
-        ("print", "Bill Search"),
+        ("print",),
     ]
 
 
@@ -111,3 +106,14 @@ def test_print_bill_search_controls_requires_one_exact_match(
         match=rf"found {match_count}\.",
     ):
         run_with_descendants([element() for _ in range(match_count)])
+
+
+def test_print_bill_search_controls_reports_missing_main_window() -> None:
+    def window_finder(_backend):
+        return None
+
+    with pytest.raises(
+        RuntimeError,
+        match="Could not find the 'SmartAdvisor Main System'",
+    ):
+        print_bill_search_controls(window_finder)

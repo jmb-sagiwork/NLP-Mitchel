@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from pywinauto import Application
+from pywinauto import Desktop
+
+from smartadvisor_automation.probe import find_smartadvisor_window
 
 
 BILL_SEARCH_TITLE = "Bill Search"
@@ -12,14 +14,15 @@ MAIN_WINDOW_TITLE = "SmartAdvisor Main System"
 
 
 def print_bill_search_controls(
-    application_factory: Callable[..., Any] = Application,
+    window_finder: Callable[..., Any] = find_smartadvisor_window,
+    desktop_factory: Callable[..., Any] = Desktop,
 ) -> None:
     """Find the nested Bill Search window and print its complete UIA tree."""
-    app = application_factory(backend="uia").connect(
-        title=MAIN_WINDOW_TITLE,
-    )
-    main = app.window(title=MAIN_WINDOW_TITLE)
-    main.wait("exists visible enabled", timeout=15)
+    main = window_finder("uia")
+    if main is None:
+        raise RuntimeError(
+            f"Could not find the {MAIN_WINDOW_TITLE!r} top-level window."
+        )
 
     matches = [
         element
@@ -37,7 +40,9 @@ def print_bill_search_controls(
             f"ControlType='Window'); found {len(matches)}."
         )
 
-    window = matches[0]
+    window = desktop_factory(backend="uia").window(
+        handle=matches[0].handle,
+    )
     window.wait("exists visible enabled", timeout=15)
     window.print_control_identifiers()
 
