@@ -21,9 +21,11 @@ from smartadvisor_automation.workflow import (
     validate_expected_amount,
 )
 
-# The log is shown on screen and can be saved to disk, so it carries
-# selector metadata, step outcomes and amount *shapes* only. Callers never
-# pass claim ids, dates, patient accounts or amount values into it.
+# The log records charge amounts alongside selector metadata and step
+# outcomes, by decision -- masking them to shapes hid whether a mismatch was a
+# different value or the wrong control. A saved log is therefore sensitive.
+# Claim ids, dates and patient accounts are still never logged. The redacted
+# JSON diagnostics written by DiagnosticTrace stay value-free.
 MAX_LOG_LINES = 2000
 
 
@@ -142,25 +144,28 @@ class AutomationApp:
         )
         self.validate_button.pack(side=tk.LEFT, padx=(8, 0))
 
-        # Off by default: the scan touches every element in the bill window
-        # at Citrix COM latency, which takes a while.
+        # On its own row: sharing the button row clipped it off-screen at the
+        # default window width. Off by default because the scan touches every
+        # element in the bill window at Citrix COM latency.
         self.diagnose_check = ttk.Checkbutton(
-            actions,
+            container,
             text="Diagnose totals fields (slow)",
             variable=self.diagnose_amounts,
         )
-        self.diagnose_check.pack(side=tk.LEFT, padx=(16, 0))
+        self.diagnose_check.grid(
+            row=8, column=0, columnspan=2, sticky=tk.W, pady=(0, 12)
+        )
 
         result_box = ttk.LabelFrame(container, text="Result", padding=12)
         result_box.grid(
-            row=8,
+            row=9,
             column=0,
             columnspan=2,
             sticky="nsew",
             pady=(0, 12),
         )
         result_box.columnconfigure(1, weight=1)
-        container.rowconfigure(8, weight=1)
+        container.rowconfigure(9, weight=1)
 
         ttk.Label(result_box, text="Patient Account").grid(
             row=0, column=0, sticky=tk.W, padx=(0, 12), pady=5
@@ -216,17 +221,17 @@ class AutomationApp:
             command=self._clear_result,
         ).pack(side=tk.LEFT, padx=(8, 0))
 
-        self._build_log_panel(container, row=9)
+        self._build_log_panel(container, row=10)
 
         ttk.Separator(container).grid(
-            row=10, column=0, columnspan=2, sticky=tk.EW
+            row=11, column=0, columnspan=2, sticky=tk.EW
         )
         ttk.Label(
             container,
             textvariable=self.status,
             anchor=tk.W,
         ).grid(
-            row=11,
+            row=12,
             column=0,
             columnspan=2,
             sticky=tk.EW,
@@ -287,8 +292,8 @@ class AutomationApp:
         ).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Label(
             log_actions,
-            text="No claim, date, account or amount values are logged.",
-            foreground="#666666",
+            text="Contains amount values — do not share outside SmartAdvisor.",
+            foreground="#a03030",
         ).pack(side=tk.LEFT, padx=(12, 0))
 
     def _append_log(self, message: str) -> None:
@@ -326,8 +331,10 @@ class AutomationApp:
             path = directory / f"run-log-{stamp}.txt"
             path.write_text(
                 "SmartAdvisor Automation run log\n"
-                "Selector metadata and step outcomes only; no field "
-                "values.\n\n" + contents + "\n",
+                "WARNING: contains charge amount values. Treat as "
+                "sensitive and do not share outside SmartAdvisor.\n\n"
+                + contents
+                + "\n",
                 encoding="utf-8",
             )
         except OSError as exc:
@@ -500,8 +507,8 @@ class AutomationApp:
             (
                 f"The workflow stopped safely{location}.\n\n"
                 f"Reason: {code}\n\n"
-                "No input or extracted values were written to logs.\n"
-                "The Log panel shows the step-by-step trace."
+                "The Log panel shows the step-by-step trace, including "
+                "the amounts compared."
                 f"{trace_line}"
             ),
             parent=self.root,

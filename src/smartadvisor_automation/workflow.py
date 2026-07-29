@@ -148,10 +148,17 @@ def normalize_amount(value: str) -> Decimal:
         raise ValueError(f"Not a readable amount: {value!r}") from exc
 
 
-def mask_amount_shape(value: str) -> str:
-    """Render an amount as its shape (#,###.##) for value-free logging."""
+def describe_comparison(amount: str, expected: str, matched: bool) -> str:
+    """State a candidate comparison so a rejection is explicit in the log.
 
-    return re.sub(r"\d", "#", value)
+    Masking amounts to shapes hid whether a mismatch was a different value or
+    the wrong control entirely, and a log that only implied "compared and
+    rejected" led to a wrong diagnosis. Both values are recorded by decision;
+    see the privacy note in `recentconvo.md`.
+    """
+
+    verdict = "MATCH" if matched else "no match"
+    return f"amount={amount} vs expected={expected} -> {verdict}"
 
 
 class NoBillOnFileWorkflow:
@@ -171,17 +178,19 @@ class NoBillOnFileWorkflow:
         self.progress = progress or (lambda _step, _message: None)
         self.log = log or (lambda _message: None)
         self.diagnose_amounts = diagnose_amounts
+        self._scanned_totals = False
 
     def _diagnose_amount_controls(self, expected: Decimal) -> None:
-        """Report which totals control actually holds the expected amount.
+        """Report which totals control holds the expected amount.
 
-        `_lblTotals_59` is a control-array position, and a live run showed the
-        value it reports changing shape with the bill's line count -- so the
-        index is positional, not the bill total. This walks every
-        `_lblTotals_*` in the bill window and reports which index matches,
-        logging only the AutomationId, the value's shape and whether it
-        matched. No amount value is written anywhere.
+        A backstop, not the main diagnostic: an Inspect capture confirmed
+        `_lblTotals_59` is the right control, so this exists for the case
+        where a future bill layout moves it. Runs at most once per run.
         """
+
+        if self._scanned_totals:
+            return
+        self._scanned_totals = True
 
         self.progress("7.5", "Scanning totals controls (slow)")
         controls = self.driver.scan_texts(
@@ -202,10 +211,7 @@ class NoBillOnFileWorkflow:
                 self.log(f"amount-scan {automation_id} unparseable")
                 continue
             verdict = "MATCHES EXPECTED" if matched else "no match"
-            self.log(
-                f"amount-scan {automation_id} "
-                f"shape={mask_amount_shape(amount)} {verdict}"
-            )
+            self.log(f"amount-scan {automation_id} amount={amount} {verdict}")
 
     def _check_cancelled(self) -> None:
         if self.cancel_event.is_set():
@@ -337,7 +343,7 @@ class NoBillOnFileWorkflow:
         if not amount:
             self.log("amount not parseable from the totals label")
             raise AutomationError("amount_not_readable", step="7.5")
-        self.log(f"amount read shape={mask_amount_shape(amount)}")
+        self.log(f"amount read={amount}")
         return amount
 
     def run(
@@ -351,10 +357,7 @@ class NoBillOnFileWorkflow:
         expected_amount = validate_expected_amount(expected_amount)
         expected = normalize_amount(expected_amount)
 
-        self.log(
-            "run start expected_shape="
-            f"{mask_amount_shape(expected_amount)}"
-        )
+        self.log(f"run start expected={expected_amount}")
 
         previous_amount: str | None = None
         row_index = 0
@@ -376,7 +379,13 @@ class NoBillOnFileWorkflow:
             if self.diagnose_amounts:
                 self._diagnose_amount_controls(expected)
 
-            if normalize_amount(amount) == expected:
+            matched = normalize_amount(amount) == expected
+            self.log(
+                f"row {row_index} "
+                f"{describe_comparison(amount, expected_amount, matched)}"
+            )
+
+            if matched:
                 self.progress(
                     "complete", f"Matched on row {row_index + 1}"
                 )
@@ -396,12 +405,10 @@ class NoBillOnFileWorkflow:
                     f"row {row_index} repeated the previous amount; "
                     "last row reached"
                 )
-                # Nothing matched, and a positional totals index is the prime
-                # suspect. The run has already failed, so reporting which
-                # control would have matched costs nothing and saves a
+                # Nothing matched. The run has already failed, so reporting
+                # which control would have matched costs nothing and saves a
                 # rerun. The bill is still open, which the scan needs.
-                if not self.diagnose_amounts:
-                    self._diagnose_amount_controls(expected)
+                self._diagnose_amount_controls(expected)
                 self.driver.click(CONTROLS_BY_STEP["7.6"])
                 raise AutomationError(
                     "no_matching_candidate_row", step="7.5"

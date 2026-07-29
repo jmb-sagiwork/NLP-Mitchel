@@ -31,12 +31,6 @@ from smartadvisor_automation.selectors import (
 SCOPE_SEARCH_DEPTH = 2
 
 
-def _mask_digits(value: str) -> str:
-    """Log tab names without their counts, e.g. " &Lines(10)" -> Lines(##)."""
-
-    return re.sub(r"\d", "#", value)
-
-
 class SmartAdvisorDriver:
     """Small pywinauto adapter that resolves every selector before acting."""
 
@@ -61,8 +55,9 @@ class SmartAdvisorDriver:
     def _log(self, message: str) -> None:
         """Record a selector-level debug line.
 
-        Never pass field values here: the log is shown in the UI and can be
-        saved to disk, so it carries selector metadata and outcomes only.
+        Driver lines carry selector metadata and outcomes. The workflow also
+        logs amount values by decision, so a saved log is sensitive; see the
+        privacy note in `recentconvo.md`.
         """
 
         if self._log_callback is not None:
@@ -526,11 +521,11 @@ class SmartAdvisorDriver:
         if wanted in start.casefold():
             self._log(
                 f"tab {self._describe(spec)} already on "
-                f"{_mask_digits(start)}"
+                f"{start}"
             )
             return
         self._log(
-            f"tab {self._describe(spec)} starts on {_mask_digits(start)}"
+            f"tab {self._describe(spec)} starts on {start}"
         )
 
         for attempt in ("accelerator", "click_then_arrow", "fallback_key"):
@@ -587,7 +582,7 @@ class SmartAdvisorDriver:
             differs_from=before,
             timeout=settle_timeout,
         )
-        self._log(f"tab after accelerator: {_mask_digits(name)}")
+        self._log(f"tab after accelerator: {name}")
         return wanted in name.casefold()
 
     def _tab_by_keypresses(
@@ -631,7 +626,7 @@ class SmartAdvisorDriver:
                 differs_from=before,
                 timeout=settle_timeout,
             )
-            self._log(f"tab after {key}: {_mask_digits(name)}")
+            self._log(f"tab after {key}: {name}")
             if wanted in name.casefold():
                 return True
             if name == before:

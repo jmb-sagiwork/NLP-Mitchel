@@ -8,7 +8,7 @@ from smartadvisor_automation.workflow import (
     NoBillOnFileWorkflow,
     extract_amount,
     extract_patient_account,
-    mask_amount_shape,
+    describe_comparison,
     normalize_amount,
     normalize_dos,
     validate_claim_id,
@@ -255,13 +255,10 @@ def test_diagnostic_scan_names_the_index_that_matches() -> None:
 
     joined = "\n".join(lines)
     assert (
-        "amount-scan _lblTotals_47 shape=#,###.## MATCHES EXPECTED" in joined
+        "amount-scan _lblTotals_47 amount=1,180.00 MATCHES EXPECTED" in joined
     )
-    assert "amount-scan _lblTotals_59 shape=##.## no match" in joined
+    assert "amount-scan _lblTotals_59 amount=12.34 no match" in joined
     assert "amount-scan _lblTotals_60 unparseable" in joined
-    # Still no values, only shapes.
-    assert "1,180.00" not in joined
-    assert "12.34" not in joined
 
 
 def test_diagnostic_scan_is_skipped_on_a_successful_run() -> None:
@@ -292,7 +289,12 @@ def test_diagnostic_scan_runs_automatically_when_nothing_matches() -> None:
     assert driver.calls[scan_at + 1] == ("click", "7.6")
 
 
-def test_log_messages_never_carry_amount_values() -> None:
+def test_log_records_the_amounts_it_compared() -> None:
+    """Amounts are logged by decision; shapes hid right from wrong.
+
+    Claim ids, dates and patient accounts are still never logged.
+    """
+
     driver = FakeDriver(["1,952.43 (312.57)"])
     lines: list[str] = []
     workflow = NoBillOnFileWorkflow(driver, log=lines.append)
@@ -300,10 +302,27 @@ def test_log_messages_never_carry_amount_values() -> None:
     workflow.run("CASE-1", "01/02/2025", "1,952.43")
 
     joined = "\n".join(lines)
-    assert lines
-    assert "1,952.43" not in joined
-    assert "312.57" not in joined
-    assert "#,###.##" in joined
+    assert "run start expected=1,952.43" in joined
+    assert "row 0 amount=1,952.43 vs expected=1,952.43 -> MATCH" in joined
+    assert "CASE-1" not in joined
+    assert "01/02/2025" not in joined
+
+
+def test_log_states_a_rejection_per_row() -> None:
+    """A rejection must be stated, not inferred from the next step."""
+
+    driver = FakeDriver(["500.00 (1.00)", "1,180.00 (2.00)"])
+    lines: list[str] = []
+    workflow = NoBillOnFileWorkflow(driver, log=lines.append)
+
+    result = workflow.run("CASE-1", "01/02/2025", "1,180.00")
+
+    verdicts = [line for line in lines if " vs expected=" in line]
+    assert verdicts == [
+        "row 0 amount=500.00 vs expected=1,180.00 -> no match",
+        "row 1 amount=1,180.00 vs expected=1,180.00 -> MATCH",
+    ]
+    assert result.row_index == 1
 
 
 @pytest.mark.parametrize(
@@ -389,6 +408,25 @@ def test_normalize_amount_rejects_unparseable_text() -> None:
         normalize_amount("not an amount")
 
 
-def test_amount_shape_masks_every_digit() -> None:
-    assert mask_amount_shape("1,952.43") == "#,###.##"
-    assert mask_amount_shape("$742.10") == "$###.##"
+def test_comparison_is_described_both_ways() -> None:
+    assert (
+        describe_comparison("1,952.43", "1,952.43", True)
+        == "amount=1,952.43 vs expected=1,952.43 -> MATCH"
+    )
+    assert (
+        describe_comparison("12.34", "1,952.43", False)
+        == "amount=12.34 vs expected=1,952.43 -> no match"
+    )
+
+
+def test_scan_runs_at_most_once_per_run() -> None:
+    """With the checkbox on, the slow scan must not repeat for every row."""
+
+    driver = FakeDriver(["500.00 (1.00)", "742.10 (2.00)"])
+    workflow = NoBillOnFileWorkflow(driver, diagnose_amounts=True)
+
+    with pytest.raises(AutomationError):
+        workflow.run("CASE-1", "01/02/2025", "9,999.99")
+
+    scans = [call for call in driver.calls if call[0] == "scan_texts"]
+    assert len(scans) == 1

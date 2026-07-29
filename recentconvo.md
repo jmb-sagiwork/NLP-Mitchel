@@ -213,12 +213,17 @@ Retired: `263910`, `198916`, `329468`, `1901400`.
   `AccessKey: ""` was misleading, and 0.4.1's `{RIGHT}`-only attempt was the
   regression. The other two mechanisms stay as unused fallbacks; they cost
   nothing when the accelerator wins.
-- **`_lblTotals_59` is positional and not the bill total.** 0.4.2 read a
-  `#,###.##` value from a bill whose tab said `Lines(##)` and a `##.##` value
-  from one saying `Lines(#)` — the index tracks a grid position, so it lands
-  on a different cell as the line count changes. Set the "Diagnose totals
-  fields" checkbox to log which `_lblTotals_*` index actually equals the
-  expected amount; it reports AutomationId, value shape and a match flag only.
+- **`_lblTotals_59` is correct.** An earlier note here claimed it was a grid
+  position that drifted with the line count, inferred from one bill logging
+  `#,###.##` and another `##.##`. That was wrong: an Inspect capture shows it
+  holding the wanted charge amount, plain value first and parenthesised
+  adjustment second, which is what `extract_amount` parses. The two bills
+  simply had different totals. **Lesson: masked logs made a value difference
+  indistinguishable from a selector fault** — which is why 0.4.5 logs amounts.
+- The "Diagnose totals fields" checkbox remains as a backstop, walking every
+  `_lblTotals_*` and reporting which index equals the expected amount. It runs
+  at most once per run, and automatically on the `no_matching_candidate_row`
+  exit where it costs nothing.
 - Two facts checked against the installed pywinauto 0.6.9 rather than assumed:
   - `window_text()` is **not** cached. It returns `element_info.rich_text`;
     `cache_enable` defaults to `False`, so the Name is read live from
@@ -404,7 +409,18 @@ SmartAdvisorAutomation and should be treated as reference-only.
 ## Safety and privacy
 
 - The automation is attended and runs inside the authenticated Citrix session.
-- Claim ID, DOS, Patient Account, and Amount must not be written to logs.
-- Diagnostic reports should contain selector/control metadata only.
+- Claim ID, DOS and Patient Account must not be written to logs.
+- **Amounts are logged, by decision (0.4.5).** Masking them to shapes
+  (`#,###.##`) meant a wrong value and a right value looked identical, which
+  led directly to a wrong diagnosis: two bills with different totals were read
+  as one control drifting. The run log now records each candidate's amount, the
+  expected amount and the verdict. Consequences:
+  - A saved run log is **sensitive**. The log panel and the saved file both say
+    so, and it must not be pasted outside SmartAdvisor.
+  - Logs go to `%LOCALAPPDATA%\SmartAdvisorAutomation\diagnostics\`.
+- Diagnostic **reports** are unchanged and remain value-free: `DiagnosticTrace`
+  and `scan_controls` carry selector/control metadata only, and
+  `tests/test_report_privacy.py` still enforces that. The distinction is
+  deliberate — the run log is sensitive, the reports are not.
 - No SmartAdvisor login automation is included.
 - Candidate inspection must be read-only until the correct row is confirmed.

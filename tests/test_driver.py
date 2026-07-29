@@ -573,9 +573,9 @@ def test_select_tab_reports_each_mechanism_it_tried(monkeypatch) -> None:
     joined = "\n".join(lines)
     assert "accelerator did not reach" in joined
     assert "reached via click_then_arrow" in joined
-    # Tab names are logged with their counts masked.
-    assert "Lines(##)" in joined
-    assert "Lines(10)" not in joined
+    # Tab names are logged verbatim: the line count was never sensitive and
+    # one rule for the whole log is simpler than two.
+    assert "Lines(10)" in joined
 
 
 def test_scopes_are_cached_then_invalidated(monkeypatch) -> None:
