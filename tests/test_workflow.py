@@ -264,13 +264,32 @@ def test_diagnostic_scan_names_the_index_that_matches() -> None:
     assert "12.34" not in joined
 
 
-def test_diagnostic_scan_is_off_by_default() -> None:
+def test_diagnostic_scan_is_skipped_on_a_successful_run() -> None:
     driver = FakeDriver(["1,952.43 (312.57)"])
     workflow = NoBillOnFileWorkflow(driver)
 
     workflow.run("CASE-1", "01/02/2025", "1,952.43")
 
     assert not any(call[0] == "scan_texts" for call in driver.calls)
+
+
+def test_diagnostic_scan_runs_automatically_when_nothing_matches() -> None:
+    """A failed run should not need repeating just to turn the scan on."""
+
+    driver = FakeDriver(["500.00 (1.00)", "742.10 (2.00)"])
+    lines: list[str] = []
+    workflow = NoBillOnFileWorkflow(driver, log=lines.append)
+
+    with pytest.raises(AutomationError) as captured:
+        workflow.run("CASE-1", "01/02/2025", "1,180.00")
+
+    assert captured.value.code == "no_matching_candidate_row"
+    assert ("scan_texts", "frmBillEntry", "_lblTotals_") in driver.calls
+    joined = "\n".join(lines)
+    assert "MATCHES EXPECTED" in joined
+    # The scan runs while the bill is still open, before it is closed.
+    scan_at = driver.calls.index(("scan_texts", "frmBillEntry", "_lblTotals_"))
+    assert driver.calls[scan_at + 1] == ("click", "7.6")
 
 
 def test_log_messages_never_carry_amount_values() -> None:

@@ -396,6 +396,12 @@ class NoBillOnFileWorkflow:
                     f"row {row_index} repeated the previous amount; "
                     "last row reached"
                 )
+                # Nothing matched, and a positional totals index is the prime
+                # suspect. The run has already failed, so reporting which
+                # control would have matched costs nothing and saves a
+                # rerun. The bill is still open, which the scan needs.
+                if not self.diagnose_amounts:
+                    self._diagnose_amount_controls(expected)
                 self.driver.click(CONTROLS_BY_STEP["7.6"])
                 raise AutomationError(
                     "no_matching_candidate_row", step="7.5"
