@@ -37,11 +37,25 @@ BILL_PENDED_WARNING_OK_NAME = "&OK"
 # candidate while it is still on screen.
 BILL_ENTRY_WINDOW_AUTOMATION_ID = "frmBillEntry"
 
-# Charge amount on the Lines tab, reached with the Alt+L accelerator. The tab
-# and pane names carry the line count ("Lines(10)"), so they are unusable as
-# selectors; this control-array id is stable across bills.
+# The bill's tab control. Two things about it drive the design:
+#
+#   * It publishes only the *selected* page in the UIA tree, so the Lines
+#     controls do not exist at all until Lines is selected.
+#   * Its Name is the selected page's text ("  Hea&der", " &Lines(10)"),
+#     which makes it a reliable way to confirm the switch actually happened.
+#
+# Alt+L does not work: the "&L" in the tab text is a rendered underline, not
+# an accelerator this control processes. Arrow the selection along instead
+# and watch the Name, rather than firing a key and hoping.
+BILL_TAB_AUTOMATION_ID = "Tab1"
+BILL_TAB_NEXT_KEY = "{RIGHT}"
+BILL_LINES_TAB_NAME_FRAGMENT = "Lines"
+BILL_TAB_MAX_PRESSES = 12
+
+# Charge amount on the Lines tab. The tab and pane names carry the line count
+# ("Lines(10)") so they are unusable as selectors; this control-array id is
+# stable across bills.
 BILL_LINES_AMOUNT_AUTOMATION_ID = "_lblTotals_59"
-BILL_LINES_ACCELERATOR = "%l"
 
 # Non-client title bar button: it publishes no AutomationId, so it is found by
 # Name plus ControlType, scoped to the bill window. Unscoped it would match
@@ -137,9 +151,10 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ),
     ControlSpec(
         step="7.4",
-        automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
-        label="Bill window",
-        action="window_keys",
+        automation_id=BILL_TAB_AUTOMATION_ID,
+        label="Lines tab",
+        action="select_tab",
+        scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
     ),
     ControlSpec(
         step="7.5",

@@ -168,7 +168,7 @@ Ctrl+O → _cmdSearch_1 → clear txtClient → btnAdvacedSearch
 → {ENTER}                                confirm the row
 → cmdOk                                  Open Bill OK: opens frmBillEntry
 → radButton1                             only if the pended-bill warning shows
-→ Alt+L                                  Lines tab
+→ select Lines tab on Tab1                {RIGHT} until the Name says Lines
 → read _lblTotals_59                     first plain value only
 → title bar Close on frmBillEntry, i += 1
 ```
@@ -203,8 +203,21 @@ Retired: `263910`, `198916`, `329468`, `1901400`.
 - The title bar Close button has no AutomationId, so `ControlSpec` gained
   optional `name`/`control_type`, and `scope_automation_id` to confine the
   search — unscoped, every window's Close button matches.
-- `Alt+L` cannot be replaced by a tab-name match: the tab and pane names carry
-  the line count (`Lines(10)`).
+- **`Alt+L` does not work.** Confirmed live in 0.4.0: the tab control reported
+  `AccessKey: ""` and the `&L` in the tab text is only a rendered underline.
+  Sending `%l` to `frmBillEntry` left Header selected, so `_lblTotals_59`
+  resolved to `matches=0`.
+- The bill's tab control (`Tab1`) publishes **only the selected page** in the
+  UIA tree, so the Lines controls do not exist at all until Lines is selected.
+  Its `Name` is the selected page's text (`"  Hea&der"`, `" &Lines(10)"`),
+  which is what makes the switch verifiable: press `{RIGHT}`, re-read the
+  Name, stop when it contains "Lines", and bail out on a wrap-around.
+- The tab and pane names carry the line count (`Lines(10)`), so they still
+  cannot be used as selectors — only as a substring check.
+- Resolving an unscoped selector took **27 seconds** live, because
+  `_all_elements` walked every process window's full descendant tree on every
+  poll. Containers are now cached per candidate row (`invalidate_scopes()`)
+  and looked up with `descendants(depth=SCOPE_SEARCH_DEPTH)`.
 
 ### Still open
 

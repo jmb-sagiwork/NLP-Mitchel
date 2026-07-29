@@ -69,8 +69,15 @@ class FakeDriver:
     def send_keys(self, spec, keys: str) -> None:
         self.calls.append(("send_keys", spec.step, keys))
 
-    def send_window_keys(self, spec, keys: str) -> None:
-        self.calls.append(("send_window_keys", spec.step, keys))
+    def select_tab(
+        self, spec, *, keys: str, expected_fragment: str, max_presses: int
+    ) -> None:
+        self.calls.append(
+            ("select_tab", spec.step, keys, expected_fragment)
+        )
+
+    def invalidate_scopes(self) -> None:
+        self.calls.append(("invalidate_scopes",))
 
     def is_present(self, spec) -> bool:
         self.calls.append(("is_present", spec.step))
@@ -87,6 +94,7 @@ def candidate_calls(row_index: int) -> list[tuple[str, ...]]:
     """The calls one candidate iteration makes, including the seek."""
 
     calls = [
+        ("invalidate_scopes",),
         *SEARCH_CALLS,
         ("focus_grid", "7.0"),
         ("send_keys", "7.1", "{DOWN}"),
@@ -99,7 +107,7 @@ def candidate_calls(row_index: int) -> list[tuple[str, ...]]:
             ("send_keys", "7.1", "{ENTER}"),
             ("click", "7.2"),
             ("is_present", "7.3"),
-            ("send_window_keys", "7.4", "%l"),
+            ("select_tab", "7.4", "{RIGHT}", "Lines"),
             ("read", "7.5"),
         ]
     )

@@ -956,7 +956,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.4.0",
+        "utility_version": "0.4.1",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

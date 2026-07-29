@@ -428,38 +428,154 @@ def test_send_keys_wraps_failures(monkeypatch) -> None:
     assert captured.value.code == "send_keys_failed"
 
 
-def test_send_window_keys_sends_the_accelerator(monkeypatch) -> None:
-    calls: list[str] = []
-    element = SimpleNamespace(
-        set_focus=lambda: calls.append("focus"),
-        type_keys=lambda keys, **kwargs: calls.append(f"keys:{keys}"),
+class FakeTabControl:
+    """A tab control whose Name is whichever page is selected.
+
+    That is the real behaviour: the control publishes only the selected
+    page's children, and its Name is that page's text.
+    """
+
+    def __init__(self, pages: list[str], selected: int = 0) -> None:
+        self.pages = pages
+        self.selected = selected
+        self.presses = 0
+
+    def set_focus(self) -> None:
+        pass
+
+    def window_text(self) -> str:
+        return self.pages[self.selected]
+
+    def type_keys(self, _keys: str, **_kwargs) -> None:
+        self.presses += 1
+        self.selected = (self.selected + 1) % len(self.pages)
+
+
+def select_lines_tab(driver, tab: FakeTabControl, monkeypatch) -> None:
+    monkeypatch.setattr(driver, "resolve", lambda _spec: tab)
+    driver.select_tab(
+        CONTROLS_BY_STEP["7.4"],
+        keys="{RIGHT}",
+        expected_fragment="Lines",
+        max_presses=12,
     )
+
+
+def test_select_tab_stops_as_soon_as_the_page_is_shown(monkeypatch) -> None:
+    tab = FakeTabControl(["  Hea&der", " &Codes", " &Lines(10)"])
     driver = SmartAdvisorDriver()
-    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
 
-    driver.send_window_keys(CONTROLS_BY_STEP["7.4"], "%l")
+    select_lines_tab(driver, tab, monkeypatch)
 
-    assert calls == ["focus", "keys:%l"]
+    assert tab.presses == 2
+    assert "Lines" in tab.window_text()
 
 
-def test_send_window_keys_wraps_failures(monkeypatch) -> None:
+def test_select_tab_presses_nothing_when_already_on_the_page(
+    monkeypatch,
+) -> None:
+    tab = FakeTabControl([" &Lines(10)", "  Hea&der"])
+    driver = SmartAdvisorDriver()
+
+    select_lines_tab(driver, tab, monkeypatch)
+
+    assert tab.presses == 0
+
+
+def test_select_tab_fails_once_the_strip_wraps(monkeypatch) -> None:
+    """Alt+L did nothing; arrowing past every page must not spin forever."""
+
+    tab = FakeTabControl(["  Hea&der", " &Codes"])
+    driver = SmartAdvisorDriver()
+
+    with pytest.raises(AutomationError) as captured:
+        select_lines_tab(driver, tab, monkeypatch)
+
+    assert captured.value.code == "tab_not_found"
+    assert captured.value.step == "7.4"
+    # Two pages, so it detects the wrap rather than using all 12 presses.
+    assert tab.presses == 2
+
+
+def test_select_tab_wraps_key_failures(monkeypatch) -> None:
     def fail_type(_keys, **_kwargs):
         raise RuntimeError("window not accepting input")
 
-    driver = SmartAdvisorDriver()
-    monkeypatch.setattr(
-        driver,
-        "resolve",
-        lambda _spec: SimpleNamespace(
-            set_focus=lambda: None,
-            type_keys=fail_type,
-        ),
+    tab = SimpleNamespace(
+        set_focus=lambda: None,
+        window_text=lambda: "  Hea&der",
+        type_keys=fail_type,
     )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: tab)
 
     with pytest.raises(AutomationError) as captured:
-        driver.send_window_keys(CONTROLS_BY_STEP["7.4"], "%l")
+        driver.select_tab(
+            CONTROLS_BY_STEP["7.4"],
+            keys="{RIGHT}",
+            expected_fragment="Lines",
+            max_presses=12,
+        )
 
-    assert captured.value.code == "window_keys_failed"
+    assert captured.value.code == "tab_select_failed"
+
+
+def test_select_tab_logs_the_page_without_its_count(monkeypatch) -> None:
+    lines: list[str] = []
+    tab = FakeTabControl(["  Hea&der", " &Lines(10)"])
+    driver = SmartAdvisorDriver(log=lines.append)
+
+    select_lines_tab(driver, tab, monkeypatch)
+
+    assert any("Lines(##)" in line for line in lines)
+    assert not any("Lines(10)" in line for line in lines)
+
+
+def test_scopes_are_cached_then_invalidated(monkeypatch) -> None:
+    """Resolving a container walks window subtrees, so it must not repeat."""
+
+    walks = {"count": 0}
+    bill_window = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="frmBillEntry",
+            name="Bill: redacted",
+            control_type="Window",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+        descendants=lambda **_kwargs: [],
+    )
+
+    def descendants(**_kwargs):
+        walks["count"] += 1
+        return [bill_window]
+
+    main_window = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="bilMain",
+            name="SmartAdvisor Main System",
+            control_type="Window",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+        descendants=descendants,
+    )
+
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+    driver.backend = "uia"
+    driver.process_id = 1234
+    monkeypatch.setattr(
+        driver, "_windows_for_process", lambda: [main_window]
+    )
+
+    assert driver._find_scope("frmBillEntry") is bill_window
+    assert driver._find_scope("frmBillEntry") is bill_window
+    assert walks["count"] == 1
+
+    driver.invalidate_scopes()
+
+    assert driver._find_scope("frmBillEntry") is bill_window
+    assert walks["count"] == 2
 
 
 def test_is_present_reports_absence_without_raising(monkeypatch) -> None:

@@ -21,6 +21,19 @@ from smartadvisor_automation.selectors import (
     BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS,
 )
 
+# A scoped selector's container is looked up from the top-level windows, and
+# walking every descendant of the whole application costs tens of seconds.
+# Every container this workflow scopes to sits within a few levels of a
+# top-level window, so cap the walk. Falls back to an unrestricted walk if
+# the backend does not support a depth argument.
+SCOPE_SEARCH_DEPTH = 4
+
+
+def _mask_digits(value: str) -> str:
+    """Log tab names without their counts, e.g. " &Lines(10)" -> Lines(##)."""
+
+    return re.sub(r"\d", "#", value)
+
 
 class SmartAdvisorDriver:
     """Small pywinauto adapter that resolves every selector before acting."""
@@ -41,6 +54,7 @@ class SmartAdvisorDriver:
         self._landmark_scope: Any | None = None
         self._landmark_automation_id: str | None = None
         self._log_callback = log
+        self._scope_cache: dict[str, Any] = {}
 
     def _log(self, message: str) -> None:
         """Record a selector-level debug line.
@@ -229,20 +243,49 @@ class SmartAdvisorDriver:
             raise AutomationError("window_enumeration_failed") from exc
 
     @staticmethod
-    def _elements_in_scope(scope: Any) -> list[Any]:
+    def _elements_in_scope(
+        scope: Any, *, depth: int | None = None
+    ) -> list[Any]:
         elements = [scope]
+        if depth is not None:
+            try:
+                elements.extend(scope.descendants(depth=depth))
+                return elements
+            except Exception:
+                # Backend without depth support; fall through to a full walk.
+                pass
+
         try:
             elements.extend(scope.descendants())
         except Exception:
             pass
         return elements
 
+    def invalidate_scopes(self) -> None:
+        """Forget cached containers.
+
+        Each candidate row opens a fresh bill window, so a cached handle from
+        the previous row must not be reused.
+        """
+
+        self._scope_cache.clear()
+
     def _find_scope(self, scope_automation_id: str) -> Any | None:
-        """Resolve the single container a scoped selector searches inside."""
+        """Resolve the single container a scoped selector searches inside.
+
+        Cached, because resolving a container means walking top-level window
+        subtrees and the same container is used by several steps in a row.
+        """
+
+        cached = self._scope_cache.get(scope_automation_id)
+        if cached is not None and self._safe_state(cached, "is_visible"):
+            return cached
 
         candidates: list[Any] = []
         for window in self._windows_for_process():
-            candidates.extend(self._elements_in_scope(window))
+            candidates.extend(
+                self._elements_in_scope(window, depth=SCOPE_SEARCH_DEPTH)
+            )
 
         matches = matching_elements(candidates, scope_automation_id)
         actionable = [
@@ -251,7 +294,10 @@ class SmartAdvisorDriver:
             if self._safe_state(element, "is_visible")
         ]
         if len(actionable) != 1:
+            self._scope_cache.pop(scope_automation_id, None)
             return None
+
+        self._scope_cache[scope_automation_id] = actionable[0]
         return actionable[0]
 
     def _all_elements(self, spec: ControlSpec) -> list[Any]:
@@ -379,23 +425,69 @@ class SmartAdvisorDriver:
             raise AutomationError("send_keys_failed", step=spec.step) from exc
         self._log(f"keys {self._describe(spec)} {keys}")
 
-    def send_window_keys(self, spec: ControlSpec, keys: str) -> None:
-        """Send an accelerator to a window rather than to one control."""
+    @staticmethod
+    def _element_name(element: Any) -> str:
+        try:
+            return str(element.window_text() or "").strip()
+        except Exception:
+            return ""
+
+    def select_tab(
+        self,
+        spec: ControlSpec,
+        *,
+        keys: str,
+        expected_fragment: str,
+        max_presses: int,
+    ) -> None:
+        """Move a tab control's selection until the wanted page is shown.
+
+        The control's Name is the selected page's text, so each press can be
+        verified instead of assumed. This matters because the control only
+        publishes the selected page's children in the UIA tree — the wanted
+        controls do not exist until the switch has actually happened.
+        """
 
         element = self.resolve(spec)
         try:
             element.set_focus()
         except Exception:
-            # type_keys(set_foreground=True) activates the window anyway.
+            # The tab strip usually already holds focus at this point.
             pass
 
-        try:
-            element.type_keys(keys, set_foreground=True)
-        except Exception as exc:
-            raise AutomationError(
-                "window_keys_failed", step=spec.step
-            ) from exc
-        self._log(f"window_keys {self._describe(spec)} {keys}")
+        wanted = expected_fragment.casefold()
+        seen: set[str] = set()
+
+        for press in range(max_presses + 1):
+            name = self._element_name(element)
+            if wanted in name.casefold():
+                self._log(
+                    f"tab {self._describe(spec)} selected "
+                    f"{_mask_digits(name)} after {press} press(es)"
+                )
+                return
+
+            if name and name in seen:
+                # Back to a page already visited: the strip has wrapped, so
+                # the wanted page is not on this control.
+                self._log(
+                    f"tab {self._describe(spec)} cycled without reaching "
+                    f"{expected_fragment!r}"
+                )
+                break
+            seen.add(name)
+
+            if press == max_presses:
+                break
+
+            try:
+                element.type_keys(keys, set_foreground=True)
+            except Exception as exc:
+                raise AutomationError(
+                    "tab_select_failed", step=spec.step
+                ) from exc
+
+        raise AutomationError("tab_not_found", step=spec.step)
 
     def is_present(
         self,

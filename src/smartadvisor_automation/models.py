@@ -13,7 +13,7 @@ Action = Literal[
     "close",
     "focus",
     "keys",
-    "window_keys",
+    "select_tab",
 ]
 
 

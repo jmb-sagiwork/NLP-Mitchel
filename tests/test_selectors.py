@@ -54,6 +54,20 @@ def test_search_and_open_use_differently_cased_ok_buttons() -> None:
     assert OPEN_BILL_OK_AUTOMATION_ID == "cmdOk"
 
 
+def test_lines_tab_is_selected_rather_than_accelerated() -> None:
+    """Alt+L is not an accelerator this tab control processes.
+
+    The "&L" in the tab text is only a rendered underline, so the page has
+    to be selected by moving the strip and checking the control's Name.
+    """
+
+    tab = CONTROLS_BY_STEP["7.4"]
+
+    assert tab.automation_id == "Tab1"
+    assert tab.action == "select_tab"
+    assert tab.scope_automation_id == "frmBillEntry"
+
+
 def test_amount_step_reads_the_lines_total() -> None:
     amount_control = CONTROLS_BY_STEP["7.5"]
 

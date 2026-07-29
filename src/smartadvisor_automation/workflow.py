@@ -10,7 +10,9 @@ from typing import Protocol
 from smartadvisor_automation.errors import AutomationError, WorkflowCancelled
 from smartadvisor_automation.models import ControlSpec, WorkflowResult
 from smartadvisor_automation.selectors import (
-    BILL_LINES_ACCELERATOR,
+    BILL_LINES_TAB_NAME_FRAGMENT,
+    BILL_TAB_MAX_PRESSES,
+    BILL_TAB_NEXT_KEY,
     CONTROLS_BY_STEP,
     GRID_CALIBRATE_DOWN,
     GRID_CALIBRATE_UP,
@@ -54,9 +56,18 @@ class WorkflowDriver(Protocol):
 
     def send_keys(self, spec: ControlSpec, keys: str) -> None: ...
 
-    def send_window_keys(self, spec: ControlSpec, keys: str) -> None: ...
+    def select_tab(
+        self,
+        spec: ControlSpec,
+        *,
+        keys: str,
+        expected_fragment: str,
+        max_presses: int,
+    ) -> None: ...
 
     def is_present(self, spec: ControlSpec) -> bool: ...
+
+    def invalidate_scopes(self) -> None: ...
 
 
 def validate_claim_id(value: str) -> str:
@@ -253,11 +264,18 @@ class NoBillOnFileWorkflow:
             self.progress("7.3", "Acknowledging the pended bill warning")
             self.driver.click(warning)
 
+        # The tab control only publishes the selected page's children, so the
+        # amount does not exist until Lines is genuinely selected. select_tab
+        # confirms the switch from the control's own Name rather than firing
+        # an accelerator and hoping.
         self._run_step(
             "7.4",
-            "Opening the Lines tab",
-            lambda: self.driver.send_window_keys(
-                CONTROLS_BY_STEP["7.4"], BILL_LINES_ACCELERATOR
+            "Switching to the Lines tab",
+            lambda: self.driver.select_tab(
+                CONTROLS_BY_STEP["7.4"],
+                keys=BILL_TAB_NEXT_KEY,
+                expected_fragment=BILL_LINES_TAB_NAME_FRAGMENT,
+                max_presses=BILL_TAB_MAX_PRESSES,
             ),
         )
 
@@ -296,6 +314,9 @@ class NoBillOnFileWorkflow:
             )
             self.log(f"--- candidate row {row_index} ---")
 
+            # Each row opens a fresh bill window, so any container cached for
+            # the previous row is stale.
+            self.driver.invalidate_scopes()
             self._search(claim_id, dos_from)
             self._select_row(row_index)
             amount = self._read_candidate_amount()
