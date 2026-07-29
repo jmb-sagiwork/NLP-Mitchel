@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 from smartadvisor_automation.diagnostics import DiagnosticTrace
@@ -14,6 +15,7 @@ from smartadvisor_automation.probe import (
     find_open_bill_frame,
     find_smartadvisor_window,
     matching_elements,
+    matching_spec_elements,
 )
 from smartadvisor_automation.selectors import (
     BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS,
@@ -29,6 +31,7 @@ class SmartAdvisorDriver:
         timeout: float = 12.0,
         poll_interval: float = 0.25,
         attach_timeout: float = 6.0,
+        log: Callable[[str], None] | None = None,
     ) -> None:
         self.timeout = timeout
         self.poll_interval = poll_interval
@@ -37,6 +40,27 @@ class SmartAdvisorDriver:
         self.process_id: int | None = None
         self._landmark_scope: Any | None = None
         self._landmark_automation_id: str | None = None
+        self._log_callback = log
+
+    def _log(self, message: str) -> None:
+        """Record a selector-level debug line.
+
+        Never pass field values here: the log is shown in the UI and can be
+        saved to disk, so it carries selector metadata and outcomes only.
+        """
+
+        if self._log_callback is not None:
+            self._log_callback(message)
+
+    @staticmethod
+    def _describe(spec: ControlSpec) -> str:
+        if spec.automation_id:
+            described = spec.automation_id
+        else:
+            described = f"name={spec.name!r}"
+        if spec.scope_automation_id:
+            described = f"{spec.scope_automation_id}/{described}"
+        return described
 
     def attach(
         self,
@@ -213,12 +237,36 @@ class SmartAdvisorDriver:
             pass
         return elements
 
+    def _find_scope(self, scope_automation_id: str) -> Any | None:
+        """Resolve the single container a scoped selector searches inside."""
+
+        candidates: list[Any] = []
+        for window in self._windows_for_process():
+            candidates.extend(self._elements_in_scope(window))
+
+        matches = matching_elements(candidates, scope_automation_id)
+        actionable = [
+            element
+            for element, _strategy in matches
+            if self._safe_state(element, "is_visible")
+        ]
+        if len(actionable) != 1:
+            return None
+        return actionable[0]
+
     def _all_elements(self, spec: ControlSpec) -> list[Any]:
         if (
             self._landmark_scope is not None
+            and spec.automation_id
             and spec.automation_id == self._landmark_automation_id
         ):
             return self._elements_in_scope(self._landmark_scope)
+
+        if spec.scope_automation_id:
+            scope = self._find_scope(spec.scope_automation_id)
+            if scope is None:
+                return []
+            return self._elements_in_scope(scope)
 
         if spec.automation_id in BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS:
             frame = find_bill_search_frame(
@@ -249,8 +297,8 @@ class SmartAdvisorDriver:
 
         while time.monotonic() < deadline:
             try:
-                matches = matching_elements(
-                    self._all_elements(spec), spec.automation_id
+                matches = matching_spec_elements(
+                    self._all_elements(spec), spec
                 )
             except AutomationError:
                 raise
@@ -274,6 +322,10 @@ class SmartAdvisorDriver:
             if last_match_count > 1
             else "selector_not_found"
         )
+        self._log(
+            f"resolve {self._describe(spec)} -> {code} "
+            f"(matches={last_match_count})"
+        )
         raise AutomationError(code, step=spec.step)
 
     @staticmethod
@@ -290,6 +342,76 @@ class SmartAdvisorDriver:
             element.click_input()
         except Exception as exc:
             raise AutomationError("click_failed", step=spec.step) from exc
+        self._log(f"click {self._describe(spec)}")
+
+    def focus_grid(self, spec: ControlSpec) -> None:
+        """Put keyboard focus inside the owner-drawn results grid.
+
+        Arrow navigation only works once focus is genuinely inside the pane,
+        and a real click is the only reliable way in. Where the click lands
+        does not matter: the caller's calibration nudge normalises the
+        selection onto the topmost row afterwards.
+        """
+
+        element = self.resolve(spec)
+        try:
+            element.set_focus()
+        except Exception:
+            # click_input() can still put focus inside an unfocused pane.
+            pass
+
+        try:
+            element.click_input()
+        except Exception as exc:
+            raise AutomationError("focus_failed", step=spec.step) from exc
+        self._log(f"focus {self._describe(spec)}")
+
+    def send_keys(self, spec: ControlSpec, keys: str) -> None:
+        """Type into an already-focused control without re-clicking it."""
+
+        if not keys:
+            return
+
+        element = self.resolve(spec)
+        try:
+            element.type_keys(keys, set_foreground=True)
+        except Exception as exc:
+            raise AutomationError("send_keys_failed", step=spec.step) from exc
+        self._log(f"keys {self._describe(spec)} {keys}")
+
+    def send_window_keys(self, spec: ControlSpec, keys: str) -> None:
+        """Send an accelerator to a window rather than to one control."""
+
+        element = self.resolve(spec)
+        try:
+            element.set_focus()
+        except Exception:
+            # type_keys(set_foreground=True) activates the window anyway.
+            pass
+
+        try:
+            element.type_keys(keys, set_foreground=True)
+        except Exception as exc:
+            raise AutomationError(
+                "window_keys_failed", step=spec.step
+            ) from exc
+        self._log(f"window_keys {self._describe(spec)} {keys}")
+
+    def is_present(
+        self,
+        spec: ControlSpec,
+        *,
+        timeout: float = 1.5,
+    ) -> bool:
+        """Check for an optional control without failing when it is absent."""
+
+        try:
+            self.resolve(spec, timeout=timeout)
+        except AutomationError:
+            self._log(f"optional {self._describe(spec)} absent")
+            return False
+        self._log(f"optional {self._describe(spec)} present")
+        return True
 
     def invoke(self, spec: ControlSpec) -> None:
         """Invoke a UIA control without moving the mouse."""

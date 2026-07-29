@@ -41,6 +41,61 @@ def selector_match_strategy(element_info: Any, automation_id: str) -> str | None
     return None
 
 
+def name_match_strategy(
+    element_info: Any,
+    name: str | None,
+    control_type: str | None,
+) -> str | None:
+    """Match a control that publishes no AutomationId at all.
+
+    Non-client title bar buttons expose only a Name and a ControlType, so
+    those are the whole selector. Always use this scoped to one container:
+    every window in the process owns a "Close" button.
+    """
+
+    if not name:
+        return None
+
+    actual_name = str(getattr(element_info, "name", "") or "").strip()
+    if actual_name != name:
+        return None
+
+    if control_type:
+        actual_control_type = str(
+            getattr(element_info, "control_type", "") or ""
+        )
+        if actual_control_type != control_type:
+            return None
+
+    return "name_and_control_type"
+
+
+def spec_match_strategy(element_info: Any, spec: ControlSpec) -> str | None:
+    """Match one element against a spec.
+
+    AutomationId identifies the control when there is one. A spec may also
+    carry a Name alongside it, in which case both must agree — that is how
+    a generic framework id such as `radButton1` is pinned down to one
+    button. With no AutomationId, Name plus ControlType is the whole
+    selector.
+    """
+
+    if not spec.automation_id:
+        return name_match_strategy(element_info, spec.name, spec.control_type)
+
+    strategy = selector_match_strategy(element_info, spec.automation_id)
+    if strategy is None:
+        return None
+
+    if spec.name and (
+        name_match_strategy(element_info, spec.name, spec.control_type)
+        is None
+    ):
+        return None
+
+    return strategy
+
+
 def _safe_rectangle(element_info: Any) -> dict[str, int] | None:
     rectangle = getattr(element_info, "rectangle", None)
     if rectangle is None:
@@ -75,10 +130,23 @@ def matching_elements(
     return matches
 
 
+def matching_spec_elements(
+    descendants: Iterable[Any], spec: ControlSpec
+) -> list[tuple[Any, str]]:
+    """Match by AutomationId, or by Name/ControlType when there is none."""
+
+    matches: list[tuple[Any, str]] = []
+    for element in descendants:
+        strategy = spec_match_strategy(element.element_info, spec)
+        if strategy:
+            matches.append((element, strategy))
+    return matches
+
+
 def _probe_control(
     backend: str, descendants: list[Any], spec: ControlSpec
 ) -> ProbeResult:
-    matches = matching_elements(descendants, spec.automation_id)
+    matches = matching_spec_elements(descendants, spec)
 
     if not matches:
         return ProbeResult(
@@ -88,6 +156,7 @@ def _probe_control(
             label=spec.label,
             intended_action=spec.action,
             status="not_found",
+            selector_name=spec.name,
         )
 
     element, strategy = matches[0]
@@ -108,6 +177,7 @@ def _probe_control(
         visible=_safe_bool(element, "is_visible"),
         enabled=_safe_bool(element, "is_enabled"),
         rectangle=_safe_rectangle(info),
+        selector_name=spec.name,
     )
 
 
@@ -886,7 +956,7 @@ def scan_controls(
 
     return {
         "schema_version": 1,
-        "utility_version": "0.3.5",
+        "utility_version": "0.4.0",
         "workflow": WORKFLOW_NAME,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "privacy": {

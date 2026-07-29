@@ -150,7 +150,76 @@ Findings and fixes:
 
 The generated control tree is saved in `result.txt`.
 
-## Current dilemma: unreadable search-results grid
+## Resolved: candidate row iteration (0.4.0, not yet built)
+
+The unreadable grid is no longer blocking. Rows are walked by keyboard and each
+candidate is opened and read. **Every candidate re-runs the entire flow from
+`Ctrl+O`** — nothing is reused between candidates, which is what removes the
+need to close a bill and return to a still-populated grid.
+
+Per candidate (row index `i`, zero-based):
+
+```text
+Ctrl+O → _cmdSearch_1 → clear txtClient → btnAdvacedSearch
+→ txtClaimID → txtDOSFrom → cmdOK        (Bill Search OK: runs the search)
+→ click inside fpSearchResult            (focus; arrow keys need real focus)
+→ {DOWN}×1 {UP}×1                        CALIBRATION to the topmost row
+→ {DOWN}×i                               seek to row i
+→ {ENTER}                                confirm the row
+→ cmdOk                                  Open Bill OK: opens frmBillEntry
+→ radButton1                             only if the pended-bill warning shows
+→ Alt+L                                  Lines tab
+→ read _lblTotals_59                     first plain value only
+→ title bar Close on frmBillEntry, i += 1
+```
+
+Matching is on **charge amount only**. There is **no row cap**: the loop stops
+when the amount repeats, which is what happens once the seek clamps at the last
+row. Cancel is the operator's stop control, checked once per iteration.
+
+### Newly confirmed selectors
+
+| Purpose | Selector | Note |
+|---|---|---|
+| Run search | `cmdOK` | Bill Search dialog |
+| Open selected bill | `cmdOk` | Open Bill window — **differs only by case** |
+| Pended warning OK | `radButton1` + Name `&OK` | Generic Telerik id, so Name is required too |
+| Bill window | `frmBillEntry` | Non-modal; Name embeds bill number and DCN, so never match on Name |
+| Lines charge amount | `_lblTotals_59` | Control-array id; holds a plain value and a parenthesised one |
+| Close bill | Name `Close`, ControlType `Button` | **No AutomationId** — non-client title bar element |
+
+Retired: `263910`, `198916`, `329468`, `1901400`.
+
+### Things that bit, recorded so they do not repeat
+
+- `cmdOK` and `cmdOk` are two different buttons in two different windows.
+  Matching is exact (`selector_match_strategy`), so they cannot collide at
+  runtime, but they transpose trivially by hand. `test_selectors.py` guards it.
+- The old `extract_amount` required a literal `$`. The Lines totals have none,
+  so it silently returned the whole label. It now takes the text before the
+  first `(` and parses that.
+- `{DOWN}` then `{UP}` is **calibration, not seeking**. Folding it into the row
+  count moves every candidate down by one.
+- The title bar Close button has no AutomationId, so `ControlSpec` gained
+  optional `name`/`control_type`, and `scope_automation_id` to confine the
+  search — unscoped, every window's Close button matches.
+- `Alt+L` cannot be replaced by a tab-name match: the tab and pane names carry
+  the line count (`Lines(10)`).
+
+### Still open
+
+Patient Account has no selector in this flow. `WorkflowResult.patient_account`
+is `str | None` and reports blank. Populating it needs one capture from the
+bill's Header tab.
+
+### UI log panel
+
+The app now has a Log panel with Copy / Save / Clear, fed by both the workflow
+and driver. It records selector metadata, step outcomes and amount **shapes**
+(`#,###.##`) only — never claim ids, dates, accounts or amount values. Saved
+logs land in `%LOCALAPPDATA%\SmartAdvisorAutomation\diagnostics\`.
+
+## Historical: why the search-results grid is unreadable
 
 After searching, SmartAdvisor shows a custom results grid:
 

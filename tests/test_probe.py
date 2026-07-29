@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+from smartadvisor_automation.models import ControlSpec
 from smartadvisor_automation.probe import (
     _native_smartadvisor_handles,
     _preferred_native_handle,
@@ -11,6 +12,7 @@ from smartadvisor_automation.probe import (
     is_open_bill_frame_identity,
     is_smartadvisor_window_identity,
     selector_match_strategy,
+    spec_match_strategy,
 )
 
 
@@ -18,6 +20,8 @@ from smartadvisor_automation.probe import (
 class FakeElementInfo:
     automation_id: str = ""
     control_id: int | None = None
+    name: str = ""
+    control_type: str = ""
 
 
 def test_named_automation_id_matches_exactly() -> None:
@@ -36,6 +40,64 @@ def test_selector_does_not_match_partial_values() -> None:
     info = FakeElementInfo(automation_id="cboClientOther", control_id=263892)
 
     assert selector_match_strategy(info, "cboClient") is None
+
+
+def test_automation_ids_are_case_sensitive() -> None:
+    """cmdOK and cmdOk are different buttons in different windows."""
+
+    info = FakeElementInfo(automation_id="cmdOk")
+
+    assert selector_match_strategy(info, "cmdOk") == "automation_id"
+    assert selector_match_strategy(info, "cmdOK") is None
+
+
+def test_spec_requires_name_to_agree_when_both_are_given() -> None:
+    """A generic framework id is pinned down by also matching the Name."""
+
+    spec = ControlSpec(
+        step="7.3",
+        automation_id="radButton1",
+        label="Pended bill warning",
+        action="click",
+        name="&OK",
+    )
+
+    assert (
+        spec_match_strategy(
+            FakeElementInfo(automation_id="radButton1", name="&OK"), spec
+        )
+        == "automation_id"
+    )
+    assert (
+        spec_match_strategy(
+            FakeElementInfo(automation_id="radButton1", name="&Cancel"), spec
+        )
+        is None
+    )
+
+
+def test_spec_matches_on_name_when_there_is_no_automation_id() -> None:
+    spec = ControlSpec(
+        step="7.6",
+        automation_id="",
+        label="Close the bill window",
+        action="close",
+        name="Close",
+        control_type="Button",
+    )
+
+    assert (
+        spec_match_strategy(
+            FakeElementInfo(name="Close", control_type="Button"), spec
+        )
+        == "name_and_control_type"
+    )
+    assert (
+        spec_match_strategy(
+            FakeElementInfo(name="Close", control_type="MenuItem"), spec
+        )
+        is None
+    )
 
 
 def test_smartadvisor_identity_matches_exact_winforms_window() -> None:

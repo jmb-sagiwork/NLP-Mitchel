@@ -341,6 +341,243 @@ def test_clear_uses_edit_value_pattern(monkeypatch) -> None:
     assert calls == ["value:"]
 
 
+def test_focus_grid_clicks_even_when_set_focus_fails(monkeypatch) -> None:
+    """Arrow keys only work once focus is genuinely inside the pane."""
+
+    calls: list[str] = []
+
+    def fail_focus() -> None:
+        calls.append("focus_failed")
+        raise RuntimeError("cannot focus a custom pane")
+
+    element = SimpleNamespace(
+        set_focus=fail_focus,
+        click_input=lambda: calls.append("click"),
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.focus_grid(CONTROLS_BY_STEP["7.0"])
+
+    assert calls == ["focus_failed", "click"]
+
+
+def test_focus_grid_reports_failure_when_the_click_fails(monkeypatch) -> None:
+    def fail_click() -> None:
+        raise RuntimeError("mouse input failed")
+
+    element = SimpleNamespace(
+        set_focus=lambda: None,
+        click_input=fail_click,
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    with pytest.raises(AutomationError) as captured:
+        driver.focus_grid(CONTROLS_BY_STEP["7.0"])
+
+    assert captured.value.code == "focus_failed"
+    assert captured.value.step == "7.0"
+
+
+def test_send_keys_types_into_the_focused_control(monkeypatch) -> None:
+    calls: list[str] = []
+    element = SimpleNamespace(
+        type_keys=lambda keys, **kwargs: calls.append(
+            f"{keys}:{kwargs['set_foreground']}"
+        ),
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.send_keys(CONTROLS_BY_STEP["7.1"], "{DOWN}{DOWN}")
+
+    assert calls == ["{DOWN}{DOWN}:True"]
+
+
+def test_send_keys_skips_an_empty_seek(monkeypatch) -> None:
+    """Row 0 needs no seek presses, so nothing should be resolved."""
+
+    resolved: list[str] = []
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(
+        driver,
+        "resolve",
+        lambda spec: resolved.append(spec.step) or SimpleNamespace(),
+    )
+
+    driver.send_keys(CONTROLS_BY_STEP["7.1"], "")
+
+    assert resolved == []
+
+
+def test_send_keys_wraps_failures(monkeypatch) -> None:
+    def fail_type(_keys, **_kwargs):
+        raise RuntimeError("keyboard blocked")
+
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(
+        driver,
+        "resolve",
+        lambda _spec: SimpleNamespace(type_keys=fail_type),
+    )
+
+    with pytest.raises(AutomationError) as captured:
+        driver.send_keys(CONTROLS_BY_STEP["7.1"], "{DOWN}")
+
+    assert captured.value.code == "send_keys_failed"
+
+
+def test_send_window_keys_sends_the_accelerator(monkeypatch) -> None:
+    calls: list[str] = []
+    element = SimpleNamespace(
+        set_focus=lambda: calls.append("focus"),
+        type_keys=lambda keys, **kwargs: calls.append(f"keys:{keys}"),
+    )
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.send_window_keys(CONTROLS_BY_STEP["7.4"], "%l")
+
+    assert calls == ["focus", "keys:%l"]
+
+
+def test_send_window_keys_wraps_failures(monkeypatch) -> None:
+    def fail_type(_keys, **_kwargs):
+        raise RuntimeError("window not accepting input")
+
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(
+        driver,
+        "resolve",
+        lambda _spec: SimpleNamespace(
+            set_focus=lambda: None,
+            type_keys=fail_type,
+        ),
+    )
+
+    with pytest.raises(AutomationError) as captured:
+        driver.send_window_keys(CONTROLS_BY_STEP["7.4"], "%l")
+
+    assert captured.value.code == "window_keys_failed"
+
+
+def test_is_present_reports_absence_without_raising(monkeypatch) -> None:
+    driver = SmartAdvisorDriver()
+
+    def missing(_spec, *, timeout=None):
+        raise AutomationError("selector_not_found")
+
+    monkeypatch.setattr(driver, "resolve", missing)
+
+    assert driver.is_present(CONTROLS_BY_STEP["7.3"]) is False
+
+    monkeypatch.setattr(
+        driver, "resolve", lambda _spec, *, timeout=None: SimpleNamespace()
+    )
+
+    assert driver.is_present(CONTROLS_BY_STEP["7.3"]) is True
+
+
+def test_scoped_selector_searches_only_inside_its_container(
+    monkeypatch,
+) -> None:
+    """Every window owns a Close button, so the scope is what makes it safe."""
+
+    wanted = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="",
+            name="Close",
+            control_type="Button",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+    )
+    other_close = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="",
+            name="Close",
+            control_type="Button",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+    )
+    bill_window = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="frmBillEntry",
+            name="Bill: redacted",
+            control_type="Window",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+        descendants=lambda: [wanted],
+    )
+    main_window = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="bilMain",
+            name="SmartAdvisor Main System",
+            control_type="Window",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+        descendants=lambda: [bill_window, wanted, other_close],
+    )
+
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+    driver.backend = "uia"
+    driver.process_id = 1234
+    monkeypatch.setattr(
+        driver, "_windows_for_process", lambda: [main_window]
+    )
+
+    assert driver.resolve(CONTROLS_BY_STEP["7.6"], timeout=0.2) is wanted
+
+
+def test_scoped_selector_fails_when_the_container_is_absent(
+    monkeypatch,
+) -> None:
+    main_window = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="bilMain",
+            name="SmartAdvisor Main System",
+            control_type="Window",
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+        descendants=lambda: [],
+    )
+
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+    driver.backend = "uia"
+    driver.process_id = 1234
+    monkeypatch.setattr(
+        driver, "_windows_for_process", lambda: [main_window]
+    )
+
+    with pytest.raises(AutomationError) as captured:
+        driver.resolve(CONTROLS_BY_STEP["7.6"], timeout=0.1)
+
+    assert captured.value.code == "selector_not_found"
+
+
+def test_log_lines_describe_selectors_without_values(monkeypatch) -> None:
+    lines: list[str] = []
+    element = SimpleNamespace(
+        set_focus=lambda: None,
+        click_input=lambda: None,
+    )
+    driver = SmartAdvisorDriver(log=lines.append)
+    monkeypatch.setattr(driver, "resolve", lambda _spec: element)
+
+    driver.click(CONTROLS_BY_STEP["7.2"])
+    driver.focus_grid(CONTROLS_BY_STEP["7.0"])
+
+    assert lines == [
+        "click cmdOk",
+        "focus fpSearchResult",
+    ]
+
+
 def test_clear_falls_back_to_keyboard_input(monkeypatch) -> None:
     calls: list[str] = []
 
