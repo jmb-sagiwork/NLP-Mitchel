@@ -281,6 +281,7 @@ class SmartAdvisorDriver:
         if cached is not None and self._safe_state(cached, "is_visible"):
             return cached
 
+        started = time.monotonic()
         candidates: list[Any] = []
         for window in self._windows_for_process():
             candidates.extend(
@@ -293,11 +294,20 @@ class SmartAdvisorDriver:
             for element, _strategy in matches
             if self._safe_state(element, "is_visible")
         ]
+        elapsed = time.monotonic() - started
         if len(actionable) != 1:
             self._scope_cache.pop(scope_automation_id, None)
+            self._log(
+                f"scope {scope_automation_id} not resolved in {elapsed:.1f}s "
+                f"(matches={len(actionable)}, scanned={len(candidates)})"
+            )
             return None
 
         self._scope_cache[scope_automation_id] = actionable[0]
+        self._log(
+            f"scope {scope_automation_id} resolved in {elapsed:.1f}s "
+            f"(scanned={len(candidates)})"
+        )
         return actionable[0]
 
     def _all_elements(self, spec: ControlSpec) -> list[Any]:
@@ -432,62 +442,200 @@ class SmartAdvisorDriver:
         except Exception:
             return ""
 
+    def _wait_for_tab_name(
+        self,
+        element: Any,
+        *,
+        wanted: str,
+        differs_from: str,
+        timeout: float,
+    ) -> str:
+        """Poll the tab control's Name until it changes or the wait expires.
+
+        The Name is read live from the provider, so it is a reliable signal —
+        but the app needs time to repaint, and over Citrix that is not
+        instant. Reading immediately after a keystroke sees the old page and
+        makes a working keystroke look like a no-op.
+        """
+
+        deadline = time.monotonic() + timeout
+        name = self._element_name(element)
+        while True:
+            if wanted in name.casefold() or name != differs_from:
+                return name
+            if time.monotonic() >= deadline:
+                return name
+            time.sleep(self.poll_interval)
+            name = self._element_name(element)
+
+    def _click_tab_strip(self, element: Any) -> bool:
+        """Click the tab strip so arrow keys reach it.
+
+        The strip band is derived from the control's own rectangle and its
+        page's rectangle rather than hardcoded, then the leftmost tab is
+        clicked. Selecting whichever tab is leftmost is harmless: the caller
+        arrows on from wherever it lands and verifies by Name.
+        """
+
+        try:
+            rect = element.rectangle()
+            strip_height = 24
+            children = element.children()
+            if children:
+                page_top = children[0].rectangle().top
+                derived = page_top - rect.top
+                if 8 <= derived <= 80:
+                    strip_height = derived
+            element.click_input(coords=(30, max(4, strip_height // 2)))
+        except Exception:
+            return False
+        return True
+
     def select_tab(
         self,
         spec: ControlSpec,
         *,
-        keys: str,
         expected_fragment: str,
+        accelerator: str,
+        next_key: str,
+        fallback_key: str,
         max_presses: int,
+        settle_timeout: float,
     ) -> None:
-        """Move a tab control's selection until the wanted page is shown.
+        """Bring a tab page to the front, verifying by the control's Name.
 
-        The control's Name is the selected page's text, so each press can be
-        verified instead of assumed. This matters because the control only
-        publishes the selected page's children in the UIA tree — the wanted
-        controls do not exist until the switch has actually happened.
+        This control publishes only the selected page's children, so the
+        wanted controls do not exist until the switch has actually happened —
+        an unverified keystroke is worthless here.
+
+        Which mechanism works has not been pinned down: the "&L" in the tab
+        text is a rendered underline and the control reports no AccessKey,
+        yet the accelerator appears to do something; arrowing needs the strip
+        to hold focus, which it may not after a dialog. So each mechanism is
+        tried in turn and the one that worked is logged, rather than assumed.
         """
 
         element = self.resolve(spec)
+        wanted = expected_fragment.casefold()
+
+        start = self._element_name(element)
+        if wanted in start.casefold():
+            self._log(
+                f"tab {self._describe(spec)} already on "
+                f"{_mask_digits(start)}"
+            )
+            return
+        self._log(
+            f"tab {self._describe(spec)} starts on {_mask_digits(start)}"
+        )
+
+        for attempt in ("accelerator", "click_then_arrow", "fallback_key"):
+            if attempt == "accelerator":
+                worked = self._tab_by_accelerator(
+                    element,
+                    accelerator=accelerator,
+                    wanted=wanted,
+                    settle_timeout=settle_timeout,
+                )
+            elif attempt == "click_then_arrow":
+                worked = self._tab_by_keypresses(
+                    element,
+                    key=next_key,
+                    wanted=wanted,
+                    max_presses=max_presses,
+                    settle_timeout=settle_timeout,
+                    click_strip_first=True,
+                )
+            else:
+                worked = self._tab_by_keypresses(
+                    element,
+                    key=fallback_key,
+                    wanted=wanted,
+                    max_presses=max_presses,
+                    settle_timeout=settle_timeout,
+                    click_strip_first=False,
+                )
+
+            if worked:
+                self._log(f"tab reached via {attempt}")
+                return
+            self._log(f"tab {attempt} did not reach {expected_fragment!r}")
+
+        raise AutomationError("tab_not_found", step=spec.step)
+
+    def _tab_by_accelerator(
+        self,
+        element: Any,
+        *,
+        accelerator: str,
+        wanted: str,
+        settle_timeout: float,
+    ) -> bool:
+        before = self._element_name(element)
+        try:
+            element.type_keys(accelerator, set_foreground=True)
+        except Exception:
+            return False
+
+        name = self._wait_for_tab_name(
+            element,
+            wanted=wanted,
+            differs_from=before,
+            timeout=settle_timeout,
+        )
+        self._log(f"tab after accelerator: {_mask_digits(name)}")
+        return wanted in name.casefold()
+
+    def _tab_by_keypresses(
+        self,
+        element: Any,
+        *,
+        key: str,
+        wanted: str,
+        max_presses: int,
+        settle_timeout: float,
+        click_strip_first: bool,
+    ) -> bool:
+        if click_strip_first and not self._click_tab_strip(element):
+            self._log("tab strip click failed")
+            return False
+
         try:
             element.set_focus()
         except Exception:
-            # The tab strip usually already holds focus at this point.
+            # The strip may already hold focus; the click above also grants it.
             pass
 
-        wanted = expected_fragment.casefold()
         seen: set[str] = set()
-
-        for press in range(max_presses + 1):
-            name = self._element_name(element)
-            if wanted in name.casefold():
-                self._log(
-                    f"tab {self._describe(spec)} selected "
-                    f"{_mask_digits(name)} after {press} press(es)"
-                )
-                return
-
-            if name and name in seen:
-                # Back to a page already visited: the strip has wrapped, so
-                # the wanted page is not on this control.
-                self._log(
-                    f"tab {self._describe(spec)} cycled without reaching "
-                    f"{expected_fragment!r}"
-                )
-                break
-            seen.add(name)
-
-            if press == max_presses:
-                break
+        for _press in range(max_presses):
+            before = self._element_name(element)
+            if wanted in before.casefold():
+                return True
+            if before and before in seen:
+                self._log(f"tab strip cycled using {key}")
+                return False
+            seen.add(before)
 
             try:
-                element.type_keys(keys, set_foreground=True)
-            except Exception as exc:
-                raise AutomationError(
-                    "tab_select_failed", step=spec.step
-                ) from exc
+                element.type_keys(key, set_foreground=True)
+            except Exception:
+                return False
 
-        raise AutomationError("tab_not_found", step=spec.step)
+            name = self._wait_for_tab_name(
+                element,
+                wanted=wanted,
+                differs_from=before,
+                timeout=settle_timeout,
+            )
+            self._log(f"tab after {key}: {_mask_digits(name)}")
+            if wanted in name.casefold():
+                return True
+            if name == before:
+                # The keystroke moved nothing, so more of them will not help.
+                self._log(f"tab unchanged by {key}")
+                return False
+
+        return False
 
     def is_present(
         self,

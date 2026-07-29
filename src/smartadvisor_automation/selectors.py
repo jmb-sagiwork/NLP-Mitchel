@@ -47,10 +47,23 @@ BILL_ENTRY_WINDOW_AUTOMATION_ID = "frmBillEntry"
 # Alt+L does not work: the "&L" in the tab text is a rendered underline, not
 # an accelerator this control processes. Arrow the selection along instead
 # and watch the Name, rather than firing a key and hoping.
+# Which mechanism actually switches the page is not settled: the control
+# reports no AccessKey, yet the accelerator appears to do something, and
+# arrowing requires the strip to hold focus, which it may not after the
+# pended-bill dialog. So all three are tried in order and the log records
+# which one worked.
 BILL_TAB_AUTOMATION_ID = "Tab1"
+BILL_TAB_ACCELERATOR = "%l"
 BILL_TAB_NEXT_KEY = "{RIGHT}"
+# Last resort: inside an MDI parent Ctrl+Tab can switch child windows rather
+# than tab pages, so it is only reached if the other two fail.
+BILL_TAB_FALLBACK_KEY = "^{TAB}"
 BILL_LINES_TAB_NAME_FRAGMENT = "Lines"
 BILL_TAB_MAX_PRESSES = 12
+# A tab switch has to repaint before the Name reflects it, and over Citrix
+# that is not instant. Reading straight after a keystroke made a working
+# keystroke look like a no-op.
+BILL_TAB_SETTLE_TIMEOUT = 3.0
 
 # Charge amount on the Lines tab. The tab and pane names carry the line count
 # ("Lines(10)") so they are unusable as selectors; this control-array id is

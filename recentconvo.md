@@ -168,7 +168,8 @@ Ctrl+O → _cmdSearch_1 → clear txtClient → btnAdvacedSearch
 → {ENTER}                                confirm the row
 → cmdOk                                  Open Bill OK: opens frmBillEntry
 → radButton1                             only if the pended-bill warning shows
-→ select Lines tab on Tab1                {RIGHT} until the Name says Lines
+→ select Lines tab on Tab1                accelerator, then strip click +
+                                          {RIGHT}, then ^{TAB}; verified by Name
 → read _lblTotals_59                     first plain value only
 → title bar Close on frmBillEntry, i += 1
 ```
@@ -203,15 +204,27 @@ Retired: `263910`, `198916`, `329468`, `1901400`.
 - The title bar Close button has no AutomationId, so `ControlSpec` gained
   optional `name`/`control_type`, and `scope_automation_id` to confine the
   search — unscoped, every window's Close button matches.
-- **`Alt+L` does not work.** Confirmed live in 0.4.0: the tab control reported
-  `AccessKey: ""` and the `&L` in the tab text is only a rendered underline.
-  Sending `%l` to `frmBillEntry` left Header selected, so `_lblTotals_59`
-  resolved to `matches=0`.
 - The bill's tab control (`Tab1`) publishes **only the selected page** in the
   UIA tree, so the Lines controls do not exist at all until Lines is selected.
   Its `Name` is the selected page's text (`"  Hea&der"`, `" &Lines(10)"`),
-  which is what makes the switch verifiable: press `{RIGHT}`, re-read the
-  Name, stop when it contains "Lines", and bail out on a wrap-around.
+  which is what makes a switch verifiable.
+- **Reaching the Lines tab is still not settled**, and two builds guessed
+  wrong. 0.4.0 sent `%l` to `frmBillEntry` and Header stayed selected. 0.4.1
+  replaced that with `{RIGHT}` and the Name never changed either. 0.4.2 stops
+  guessing: it tries the accelerator, then a strip click plus `{RIGHT}`, then
+  `^{TAB}`, verifying by Name after each and logging which one worked.
+- Two facts checked against the installed pywinauto 0.6.9 rather than assumed:
+  - `window_text()` is **not** cached. It returns `element_info.rich_text`;
+    `cache_enable` defaults to `False`, so the Name is read live from
+    `CurrentName` each call. A repeated Name means the tab really did not move.
+  - `TabControlWrapper.select()` is **unusable here**. `UIAWrapper._select`
+    needs `children(title=...)` to expose SelectionItem, and this control's
+    only child is the page pane — there are no TabItem children.
+- The Name needs time to repaint after a keystroke, and over Citrix that is
+  not instant. Reading it immediately made a working keystroke look inert, so
+  each attempt now polls for up to `BILL_TAB_SETTLE_TIMEOUT`.
+- `^{TAB}` is the last resort deliberately: `frmBillEntry` sits inside an MDI
+  parent, where Ctrl+Tab can switch child windows rather than tab pages.
 - The tab and pane names carry the line count (`Lines(10)`), so they still
   cannot be used as selectors — only as a substring check.
 - Resolving an unscoped selector took **27 seconds** live, because

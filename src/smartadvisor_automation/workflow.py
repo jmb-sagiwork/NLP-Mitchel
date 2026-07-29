@@ -11,8 +11,11 @@ from smartadvisor_automation.errors import AutomationError, WorkflowCancelled
 from smartadvisor_automation.models import ControlSpec, WorkflowResult
 from smartadvisor_automation.selectors import (
     BILL_LINES_TAB_NAME_FRAGMENT,
+    BILL_TAB_ACCELERATOR,
+    BILL_TAB_FALLBACK_KEY,
     BILL_TAB_MAX_PRESSES,
     BILL_TAB_NEXT_KEY,
+    BILL_TAB_SETTLE_TIMEOUT,
     CONTROLS_BY_STEP,
     GRID_CALIBRATE_DOWN,
     GRID_CALIBRATE_UP,
@@ -60,9 +63,12 @@ class WorkflowDriver(Protocol):
         self,
         spec: ControlSpec,
         *,
-        keys: str,
         expected_fragment: str,
+        accelerator: str,
+        next_key: str,
+        fallback_key: str,
         max_presses: int,
+        settle_timeout: float,
     ) -> None: ...
 
     def is_present(self, spec: ControlSpec) -> bool: ...
@@ -273,9 +279,12 @@ class NoBillOnFileWorkflow:
             "Switching to the Lines tab",
             lambda: self.driver.select_tab(
                 CONTROLS_BY_STEP["7.4"],
-                keys=BILL_TAB_NEXT_KEY,
                 expected_fragment=BILL_LINES_TAB_NAME_FRAGMENT,
+                accelerator=BILL_TAB_ACCELERATOR,
+                next_key=BILL_TAB_NEXT_KEY,
+                fallback_key=BILL_TAB_FALLBACK_KEY,
                 max_presses=BILL_TAB_MAX_PRESSES,
+                settle_timeout=BILL_TAB_SETTLE_TIMEOUT,
             ),
         )
 

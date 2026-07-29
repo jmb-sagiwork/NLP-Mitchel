@@ -428,46 +428,112 @@ def test_send_keys_wraps_failures(monkeypatch) -> None:
     assert captured.value.code == "send_keys_failed"
 
 
+class FakeRect:
+    def __init__(self, top: int) -> None:
+        self.top = top
+
+
 class FakeTabControl:
     """A tab control whose Name is whichever page is selected.
 
-    That is the real behaviour: the control publishes only the selected
-    page's children, and its Name is that page's text.
+    That is the real behaviour: it publishes only the selected page's
+    children and its Name is that page's text. `responds_to` lists the
+    keystrokes that actually move the strip, so a test can model the
+    accelerator working, the arrows working, or nothing working.
     """
 
-    def __init__(self, pages: list[str], selected: int = 0) -> None:
+    def __init__(
+        self,
+        pages: list[str],
+        *,
+        responds_to: tuple[str, ...] = ("{RIGHT}",),
+        selected: int = 0,
+        needs_strip_click: bool = False,
+    ) -> None:
         self.pages = pages
         self.selected = selected
-        self.presses = 0
+        self.responds_to = responds_to
+        self.needs_strip_click = needs_strip_click
+        self.strip_clicked = False
+        self.keys: list[str] = []
 
     def set_focus(self) -> None:
         pass
 
+    def rectangle(self) -> FakeRect:
+        return FakeRect(325)
+
+    def children(self):
+        return [SimpleNamespace(rectangle=lambda: FakeRect(349))]
+
+    def click_input(self, coords=None) -> None:
+        self.strip_clicked = True
+
     def window_text(self) -> str:
         return self.pages[self.selected]
 
-    def type_keys(self, _keys: str, **_kwargs) -> None:
-        self.presses += 1
+    def type_keys(self, keys: str, **_kwargs) -> None:
+        self.keys.append(keys)
+        if keys not in self.responds_to:
+            return
+        if self.needs_strip_click and not self.strip_clicked:
+            return
         self.selected = (self.selected + 1) % len(self.pages)
 
 
-def select_lines_tab(driver, tab: FakeTabControl, monkeypatch) -> None:
+def select_lines_tab(driver, tab, monkeypatch) -> None:
     monkeypatch.setattr(driver, "resolve", lambda _spec: tab)
     driver.select_tab(
         CONTROLS_BY_STEP["7.4"],
-        keys="{RIGHT}",
         expected_fragment="Lines",
+        accelerator="%l",
+        next_key="{RIGHT}",
+        fallback_key="^{TAB}",
         max_presses=12,
+        settle_timeout=0.05,
     )
 
 
-def test_select_tab_stops_as_soon_as_the_page_is_shown(monkeypatch) -> None:
-    tab = FakeTabControl(["  Hea&der", " &Codes", " &Lines(10)"])
-    driver = SmartAdvisorDriver()
+def test_select_tab_uses_the_accelerator_when_it_works(monkeypatch) -> None:
+    tab = FakeTabControl(["  Hea&der", " &Lines(10)"], responds_to=("%l",))
+    driver = SmartAdvisorDriver(poll_interval=0.01)
 
     select_lines_tab(driver, tab, monkeypatch)
 
-    assert tab.presses == 2
+    assert tab.keys == ["%l"]
+    assert "Lines" in tab.window_text()
+
+
+def test_select_tab_falls_back_to_arrows_when_the_accelerator_is_inert(
+    monkeypatch,
+) -> None:
+    """0.4.0's symptom: %l changes nothing, so arrowing has to take over."""
+
+    tab = FakeTabControl(
+        ["  Hea&der", " &Codes", " &Lines(10)"], responds_to=("{RIGHT}",)
+    )
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+
+    select_lines_tab(driver, tab, monkeypatch)
+
+    assert tab.keys[0] == "%l"
+    assert tab.keys.count("{RIGHT}") == 2
+    assert "Lines" in tab.window_text()
+
+
+def test_select_tab_clicks_the_strip_before_arrowing(monkeypatch) -> None:
+    """0.4.1's symptom: arrows do nothing until the strip holds focus."""
+
+    tab = FakeTabControl(
+        ["  Hea&der", " &Lines(10)"],
+        responds_to=("{RIGHT}",),
+        needs_strip_click=True,
+    )
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+
+    select_lines_tab(driver, tab, monkeypatch)
+
+    assert tab.strip_clicked is True
     assert "Lines" in tab.window_text()
 
 
@@ -475,60 +541,41 @@ def test_select_tab_presses_nothing_when_already_on_the_page(
     monkeypatch,
 ) -> None:
     tab = FakeTabControl([" &Lines(10)", "  Hea&der"])
-    driver = SmartAdvisorDriver()
+    driver = SmartAdvisorDriver(poll_interval=0.01)
 
     select_lines_tab(driver, tab, monkeypatch)
 
-    assert tab.presses == 0
+    assert tab.keys == []
 
 
-def test_select_tab_fails_once_the_strip_wraps(monkeypatch) -> None:
-    """Alt+L did nothing; arrowing past every page must not spin forever."""
-
-    tab = FakeTabControl(["  Hea&der", " &Codes"])
-    driver = SmartAdvisorDriver()
+def test_select_tab_tries_every_mechanism_then_fails(monkeypatch) -> None:
+    tab = FakeTabControl(["  Hea&der", " &Codes"], responds_to=())
+    driver = SmartAdvisorDriver(poll_interval=0.01)
 
     with pytest.raises(AutomationError) as captured:
         select_lines_tab(driver, tab, monkeypatch)
 
     assert captured.value.code == "tab_not_found"
     assert captured.value.step == "7.4"
-    # Two pages, so it detects the wrap rather than using all 12 presses.
-    assert tab.presses == 2
+    # An inert keystroke is not repeated: one of each is enough to know.
+    assert tab.keys == ["%l", "{RIGHT}", "^{TAB}"]
 
 
-def test_select_tab_wraps_key_failures(monkeypatch) -> None:
-    def fail_type(_keys, **_kwargs):
-        raise RuntimeError("window not accepting input")
-
-    tab = SimpleNamespace(
-        set_focus=lambda: None,
-        window_text=lambda: "  Hea&der",
-        type_keys=fail_type,
-    )
-    driver = SmartAdvisorDriver()
-    monkeypatch.setattr(driver, "resolve", lambda _spec: tab)
-
-    with pytest.raises(AutomationError) as captured:
-        driver.select_tab(
-            CONTROLS_BY_STEP["7.4"],
-            keys="{RIGHT}",
-            expected_fragment="Lines",
-            max_presses=12,
-        )
-
-    assert captured.value.code == "tab_select_failed"
-
-
-def test_select_tab_logs_the_page_without_its_count(monkeypatch) -> None:
+def test_select_tab_reports_each_mechanism_it_tried(monkeypatch) -> None:
     lines: list[str] = []
-    tab = FakeTabControl(["  Hea&der", " &Lines(10)"])
-    driver = SmartAdvisorDriver(log=lines.append)
+    tab = FakeTabControl(
+        ["  Hea&der", " &Lines(10)"], responds_to=("{RIGHT}",)
+    )
+    driver = SmartAdvisorDriver(poll_interval=0.01, log=lines.append)
 
     select_lines_tab(driver, tab, monkeypatch)
 
-    assert any("Lines(##)" in line for line in lines)
-    assert not any("Lines(10)" in line for line in lines)
+    joined = "\n".join(lines)
+    assert "accelerator did not reach" in joined
+    assert "reached via click_then_arrow" in joined
+    # Tab names are logged with their counts masked.
+    assert "Lines(##)" in joined
+    assert "Lines(10)" not in joined
 
 
 def test_scopes_are_cached_then_invalidated(monkeypatch) -> None:

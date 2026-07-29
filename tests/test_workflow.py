@@ -70,10 +70,18 @@ class FakeDriver:
         self.calls.append(("send_keys", spec.step, keys))
 
     def select_tab(
-        self, spec, *, keys: str, expected_fragment: str, max_presses: int
+        self,
+        spec,
+        *,
+        expected_fragment: str,
+        accelerator: str,
+        next_key: str,
+        fallback_key: str,
+        max_presses: int,
+        settle_timeout: float,
     ) -> None:
         self.calls.append(
-            ("select_tab", spec.step, keys, expected_fragment)
+            ("select_tab", spec.step, next_key, expected_fragment)
         )
 
     def invalidate_scopes(self) -> None:
