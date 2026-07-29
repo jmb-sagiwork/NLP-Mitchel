@@ -10,6 +10,8 @@ from typing import Protocol
 from smartadvisor_automation.errors import AutomationError, WorkflowCancelled
 from smartadvisor_automation.models import ControlSpec, WorkflowResult
 from smartadvisor_automation.selectors import (
+    BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    BILL_LINES_AMOUNT_PREFIX,
     BILL_LINES_TAB_NAME_FRAGMENT,
     BILL_TAB_ACCELERATOR,
     BILL_TAB_FALLBACK_KEY,
@@ -74,6 +76,10 @@ class WorkflowDriver(Protocol):
     def is_present(self, spec: ControlSpec) -> bool: ...
 
     def invalidate_scopes(self) -> None: ...
+
+    def scan_texts(
+        self, scope_automation_id: str, prefix: str
+    ) -> list[tuple[str, str]]: ...
 
 
 def validate_claim_id(value: str) -> str:
@@ -158,11 +164,48 @@ class NoBillOnFileWorkflow:
         cancel_event: threading.Event | None = None,
         progress: ProgressCallback | None = None,
         log: LogCallback | None = None,
+        diagnose_amounts: bool = False,
     ) -> None:
         self.driver = driver
         self.cancel_event = cancel_event or threading.Event()
         self.progress = progress or (lambda _step, _message: None)
         self.log = log or (lambda _message: None)
+        self.diagnose_amounts = diagnose_amounts
+
+    def _diagnose_amount_controls(self, expected: Decimal) -> None:
+        """Report which totals control actually holds the expected amount.
+
+        `_lblTotals_59` is a control-array position, and a live run showed the
+        value it reports changing shape with the bill's line count -- so the
+        index is positional, not the bill total. This walks every
+        `_lblTotals_*` in the bill window and reports which index matches,
+        logging only the AutomationId, the value's shape and whether it
+        matched. No amount value is written anywhere.
+        """
+
+        self.progress("7.5", "Scanning totals controls (slow)")
+        controls = self.driver.scan_texts(
+            BILL_ENTRY_WINDOW_AUTOMATION_ID, BILL_LINES_AMOUNT_PREFIX
+        )
+        if not controls:
+            self.log("amount-scan found no totals controls")
+            return
+
+        for automation_id, raw_text in controls:
+            amount = extract_amount(raw_text)
+            if not amount:
+                self.log(f"amount-scan {automation_id} unparseable")
+                continue
+            try:
+                matched = normalize_amount(amount) == expected
+            except ValueError:
+                self.log(f"amount-scan {automation_id} unparseable")
+                continue
+            verdict = "MATCHES EXPECTED" if matched else "no match"
+            self.log(
+                f"amount-scan {automation_id} "
+                f"shape={mask_amount_shape(amount)} {verdict}"
+            )
 
     def _check_cancelled(self) -> None:
         if self.cancel_event.is_set():
@@ -329,6 +372,9 @@ class NoBillOnFileWorkflow:
             self._search(claim_id, dos_from)
             self._select_row(row_index)
             amount = self._read_candidate_amount()
+
+            if self.diagnose_amounts:
+                self._diagnose_amount_controls(expected)
 
             if normalize_amount(amount) == expected:
                 self.progress(

@@ -97,6 +97,14 @@ class FakeDriver:
         self.reads += 1
         return self.amounts[index]
 
+    def scan_texts(self, scope_automation_id: str, prefix: str):
+        self.calls.append(("scan_texts", scope_automation_id, prefix))
+        return [
+            ("_lblTotals_47", "1,180.00 (5.00)"),
+            ("_lblTotals_59", "12.34 (1.00)"),
+            ("_lblTotals_60", "not an amount"),
+        ]
+
 
 def candidate_calls(row_index: int) -> list[tuple[str, ...]]:
     """The calls one candidate iteration makes, including the seek."""
@@ -231,6 +239,38 @@ def test_workflow_honors_cancellation_between_candidates() -> None:
         workflow.run("CASE-1", "01/02/2025", "9,999.99")
 
     assert driver.reads == 1
+
+
+def test_diagnostic_scan_names_the_index_that_matches() -> None:
+    """_lblTotals_59 is positional, so the scan finds the right index."""
+
+    driver = FakeDriver(["12.34 (1.00)"])
+    lines: list[str] = []
+    workflow = NoBillOnFileWorkflow(
+        driver, log=lines.append, diagnose_amounts=True
+    )
+
+    with pytest.raises(AutomationError):
+        workflow.run("CASE-1", "01/02/2025", "1,180.00")
+
+    joined = "\n".join(lines)
+    assert (
+        "amount-scan _lblTotals_47 shape=#,###.## MATCHES EXPECTED" in joined
+    )
+    assert "amount-scan _lblTotals_59 shape=##.## no match" in joined
+    assert "amount-scan _lblTotals_60 unparseable" in joined
+    # Still no values, only shapes.
+    assert "1,180.00" not in joined
+    assert "12.34" not in joined
+
+
+def test_diagnostic_scan_is_off_by_default() -> None:
+    driver = FakeDriver(["1,952.43 (312.57)"])
+    workflow = NoBillOnFileWorkflow(driver)
+
+    workflow.run("CASE-1", "01/02/2025", "1,952.43")
+
+    assert not any(call[0] == "scan_texts" for call in driver.calls)
 
 
 def test_log_messages_never_carry_amount_values() -> None:

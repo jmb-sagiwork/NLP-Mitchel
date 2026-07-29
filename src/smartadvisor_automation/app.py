@@ -46,6 +46,7 @@ class AutomationApp:
         self.patient_account = tk.StringVar()
         self.amount = tk.StringVar()
         self.matched_row = tk.StringVar()
+        self.diagnose_amounts = tk.BooleanVar(value=False)
         self.status = tk.StringVar(
             value="Open and sign in to SmartAdvisor before running."
         )
@@ -140,6 +141,15 @@ class AutomationApp:
             command=self._start_validation,
         )
         self.validate_button.pack(side=tk.LEFT, padx=(8, 0))
+
+        # Off by default: the scan touches every element in the bill window
+        # at Citrix COM latency, which takes a while.
+        self.diagnose_check = ttk.Checkbutton(
+            actions,
+            text="Diagnose totals fields (slow)",
+            variable=self.diagnose_amounts,
+        )
+        self.diagnose_check.pack(side=tk.LEFT, padx=(16, 0))
 
         result_box = ttk.LabelFrame(container, text="Result", padding=12)
         result_box.grid(
@@ -378,6 +388,7 @@ class AutomationApp:
                 ("progress", (step, message))
             ),
             log=lambda message: self.events.put(("log", message)),
+            diagnose_amounts=self.diagnose_amounts.get(),
         )
 
         try:
@@ -578,6 +589,7 @@ class AutomationApp:
         self.amount_entry.configure(state=entry_state)
         self.run_button.configure(state=button_state)
         self.validate_button.configure(state=button_state)
+        self.diagnose_check.configure(state=button_state)
         self.cancel_button.configure(
             state=tk.NORMAL if running and allow_cancel else tk.DISABLED
         )

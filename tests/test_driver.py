@@ -723,6 +723,65 @@ def test_scoped_selector_fails_when_the_container_is_absent(
     assert captured.value.code == "selector_not_found"
 
 
+def test_search_depth_caps_an_unscoped_walk(monkeypatch) -> None:
+    """An unbounded walk costs seconds per level at Citrix COM latency."""
+
+    depths: list[object] = []
+    window = SimpleNamespace(
+        element_info=SimpleNamespace(
+            automation_id="bilMain", name="", control_type="Window"
+        ),
+        is_visible=lambda: True,
+        is_enabled=lambda: True,
+        descendants=lambda **kwargs: depths.append(kwargs.get("depth")) or [],
+    )
+
+    driver = SmartAdvisorDriver(poll_interval=0.01)
+    driver.backend = "uia"
+    driver.process_id = 1234
+    monkeypatch.setattr(driver, "_windows_for_process", lambda: [window])
+
+    with pytest.raises(AutomationError):
+        driver.resolve(CONTROLS_BY_STEP["7.3"], timeout=0.05)
+
+    assert depths and all(depth == 3 for depth in depths)
+
+
+def test_scan_texts_reports_only_the_wanted_prefix(monkeypatch) -> None:
+    def label(automation_id: str, text: str):
+        return SimpleNamespace(
+            element_info=SimpleNamespace(
+                automation_id=automation_id, name="", control_type="Text"
+            ),
+            window_text=lambda: text,
+        )
+
+    scope = SimpleNamespace(
+        descendants=lambda **_kwargs: [
+            label("_lblTotals_47", "1,180.00 (5.00)"),
+            label("_lblTotals_59", "12.34 (1.00)"),
+            label("txtSomethingElse", "ignored"),
+        ],
+    )
+
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "_find_scope", lambda _scope_id: scope)
+
+    found = driver.scan_texts("frmBillEntry", "_lblTotals_")
+
+    assert found == [
+        ("_lblTotals_47", "1,180.00 (5.00)"),
+        ("_lblTotals_59", "12.34 (1.00)"),
+    ]
+
+
+def test_scan_texts_returns_nothing_without_its_scope(monkeypatch) -> None:
+    driver = SmartAdvisorDriver()
+    monkeypatch.setattr(driver, "_find_scope", lambda _scope_id: None)
+
+    assert driver.scan_texts("frmBillEntry", "_lblTotals_") == []
+
+
 def test_log_lines_describe_selectors_without_values(monkeypatch) -> None:
     lines: list[str] = []
     element = SimpleNamespace(

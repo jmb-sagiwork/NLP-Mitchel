@@ -21,12 +21,14 @@ from smartadvisor_automation.selectors import (
     BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS,
 )
 
-# A scoped selector's container is looked up from the top-level windows, and
-# walking every descendant of the whole application costs tens of seconds.
-# Every container this workflow scopes to sits within a few levels of a
-# top-level window, so cap the walk. Falls back to an unrestricted walk if
-# the backend does not support a depth argument.
-SCOPE_SEARCH_DEPTH = 4
+# A scoped selector's container is looked up from the top-level windows.
+# Keep this as shallow as the containers allow: a live run resolved
+# frmBillEntry in 28s having scanned only 64 elements, so the cost is per
+# element -- roughly 440ms for one COM property read over Citrix -- not tree
+# size. frmBillEntry sits two levels below the main window (an anonymous pane
+# in between), so two is enough. Falls back to an unrestricted walk if the
+# backend does not support a depth argument.
+SCOPE_SEARCH_DEPTH = 2
 
 
 def _mask_digits(value: str) -> str:
@@ -335,7 +337,9 @@ class SmartAdvisorDriver:
 
         elements: list[Any] = []
         for window in self._windows_for_process():
-            elements.extend(self._elements_in_scope(window))
+            elements.extend(
+                self._elements_in_scope(window, depth=spec.search_depth)
+            )
         return elements
 
     def resolve(
@@ -735,6 +739,44 @@ class SmartAdvisorDriver:
             )
         except Exception as exc:
             raise AutomationError("input_failed", step=spec.step) from exc
+
+    def scan_texts(
+        self,
+        scope_automation_id: str,
+        prefix: str,
+    ) -> list[tuple[str, str]]:
+        """Read every control in a scope whose AutomationId starts with prefix.
+
+        Diagnostic only, and slow: it touches every element in the subtree at
+        Citrix COM latency. Used to find which control-array index actually
+        holds a wanted value when the index turns out to be positional.
+        """
+
+        scope = self._find_scope(scope_automation_id)
+        if scope is None:
+            return []
+
+        started = time.monotonic()
+        found: list[tuple[str, str]] = []
+        for element in self._elements_in_scope(scope):
+            info = getattr(element, "element_info", None)
+            if info is None:
+                continue
+            automation_id = str(getattr(info, "automation_id", "") or "")
+            if not automation_id.startswith(prefix):
+                continue
+            try:
+                text = str(element.window_text() or "")
+            except Exception:
+                continue
+            found.append((automation_id, text))
+
+        elapsed = time.monotonic() - started
+        self._log(
+            f"scan {prefix}* in {scope_automation_id}: "
+            f"{len(found)} control(s) in {elapsed:.1f}s"
+        )
+        return found
 
     def read_text(self, spec: ControlSpec) -> str:
         element = self.resolve(spec)

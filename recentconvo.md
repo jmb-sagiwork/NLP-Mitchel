@@ -208,11 +208,17 @@ Retired: `263910`, `198916`, `329468`, `1901400`.
   UIA tree, so the Lines controls do not exist at all until Lines is selected.
   Its `Name` is the selected page's text (`"  Hea&der"`, `" &Lines(10)"`),
   which is what makes a switch verifiable.
-- **Reaching the Lines tab is still not settled**, and two builds guessed
-  wrong. 0.4.0 sent `%l` to `frmBillEntry` and Header stayed selected. 0.4.1
-  replaced that with `{RIGHT}` and the Name never changed either. 0.4.2 stops
-  guessing: it tries the accelerator, then a strip click plus `{RIGHT}`, then
-  `^{TAB}`, verifying by Name after each and logging which one worked.
+- **The accelerator does work.** Confirmed live in 0.4.2:
+  `tab reached via accelerator`, on every candidate row. The dump's
+  `AccessKey: ""` was misleading, and 0.4.1's `{RIGHT}`-only attempt was the
+  regression. The other two mechanisms stay as unused fallbacks; they cost
+  nothing when the accelerator wins.
+- **`_lblTotals_59` is positional and not the bill total.** 0.4.2 read a
+  `#,###.##` value from a bill whose tab said `Lines(##)` and a `##.##` value
+  from one saying `Lines(#)` — the index tracks a grid position, so it lands
+  on a different cell as the line count changes. Set the "Diagnose totals
+  fields" checkbox to log which `_lblTotals_*` index actually equals the
+  expected amount; it reports AutomationId, value shape and a match flag only.
 - Two facts checked against the installed pywinauto 0.6.9 rather than assumed:
   - `window_text()` is **not** cached. It returns `element_info.rich_text`;
     `cache_enable` defaults to `False`, so the Name is read live from
@@ -227,10 +233,15 @@ Retired: `263910`, `198916`, `329468`, `1901400`.
   parent, where Ctrl+Tab can switch child windows rather than tab pages.
 - The tab and pane names carry the line count (`Lines(10)`), so they still
   cannot be used as selectors — only as a substring check.
-- Resolving an unscoped selector took **27 seconds** live, because
-  `_all_elements` walked every process window's full descendant tree on every
-  poll. Containers are now cached per candidate row (`invalidate_scopes()`)
-  and looked up with `descendants(depth=SCOPE_SEARCH_DEPTH)`.
+- **UIA cost here is per element, not per tree.** `frmBillEntry` resolved in
+  28.4s having scanned only **64** elements — roughly 440ms for one COM
+  property read over Citrix. So the fix is fewer elements touched, not a
+  smarter filter: `SCOPE_SEARCH_DEPTH` is 2 (`frmBillEntry` sits two levels
+  below the main window), containers are cached and invalidated once per
+  candidate row, and `ControlSpec.search_depth` caps unscoped walks.
+- Looking for something **absent** is the expensive case: the optional
+  `radButton1` burned 21s against a 1.5s timeout, because one poll pass
+  outlasted the whole deadline. It now searches at `search_depth=3`.
 
 ### Still open
 

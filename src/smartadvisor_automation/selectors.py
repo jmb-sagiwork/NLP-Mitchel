@@ -31,6 +31,10 @@ OPEN_BILL_OK_AUTOMATION_ID = "cmdOk"
 # absence as the normal case.
 BILL_PENDED_WARNING_OK_AUTOMATION_ID = "radButton1"
 BILL_PENDED_WARNING_OK_NAME = "&OK"
+# The warning is usually absent, and looking for something that is not there
+# is the expensive case. It sits directly on its own dialog window, so a
+# shallow walk finds it and a miss costs seconds rather than tens of seconds.
+BILL_PENDED_WARNING_SEARCH_DEPTH = 3
 
 # The opened bill. Its Name embeds the bill number and DCN, so it is never
 # matched on Name. It is non-modal, which is why Ctrl+O can start the next
@@ -69,6 +73,11 @@ BILL_TAB_SETTLE_TIMEOUT = 3.0
 # ("Lines(10)") so they are unusable as selectors; this control-array id is
 # stable across bills.
 BILL_LINES_AMOUNT_AUTOMATION_ID = "_lblTotals_59"
+# The "_59" suffix is a control-array position. A live run read a four-digit
+# total from a bill with 10+ lines and a two-digit one from a bill with
+# fewer, so the position does not track the bill total. The diagnostic scan
+# walks this prefix to find which index actually holds it.
+BILL_LINES_AMOUNT_PREFIX = "_lblTotals_"
 
 # Non-client title bar button: it publishes no AutomationId, so it is found by
 # Name plus ControlType, scoped to the bill window. Unscoped it would match
@@ -161,6 +170,7 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         label="Pended bill warning",
         action="click",
         name=BILL_PENDED_WARNING_OK_NAME,
+        search_depth=BILL_PENDED_WARNING_SEARCH_DEPTH,
     ),
     ControlSpec(
         step="7.4",

@@ -26,6 +26,11 @@ class ControlSpec:
     `scope_automation_id` restricts the search to the descendants of one
     container, which is required whenever a selector is not unique across
     the whole process (every window owns a "Close" button, for example).
+
+    `search_depth` caps how deep an unscoped search walks. Reading one UIA
+    property over Citrix costs hundreds of milliseconds, so an unbounded walk
+    is expensive: an optional control with a 1.5s timeout burned 21s in a
+    live run. Set it for controls known to sit near a top-level window.
     """
 
     step: str
@@ -36,6 +41,7 @@ class ControlSpec:
     name: str | None = None
     control_type: str | None = None
     scope_automation_id: str | None = None
+    search_depth: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
