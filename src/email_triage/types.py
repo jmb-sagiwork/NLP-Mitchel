@@ -95,6 +95,12 @@ class TriageResult:
     confidence: float
     margin: float
     needs_review: bool
+    # Sub-classification within the concern. None when the concern declares no
+    # reasons, or when no reason scored above its threshold.
+    reason_id: str | None = None
+    reason_display_name: str | None = None
+    reason_confidence: float = 0.0
+    reason_alternatives: tuple[tuple[str, float], ...] = ()
     fields: dict[str, FieldValue] = field(default_factory=dict)
     missing_fields: tuple[str, ...] = ()
     ambiguous_fields: tuple[str, ...] = ()
@@ -125,6 +131,12 @@ class TriageResult:
             "confidence": round(self.confidence, 4),
             "margin": round(self.margin, 4),
             "needs_review": self.needs_review,
+            "reason_id": self.reason_id,
+            "reason_display_name": self.reason_display_name,
+            "reason_confidence": round(self.reason_confidence, 4),
+            "reason_alternatives": [
+                [r, round(s, 4)] for r, s in self.reason_alternatives
+            ],
             "fields": {k: v.to_dict() for k, v in self.fields.items()},
             "values": self.values,
             "missing_fields": list(self.missing_fields),

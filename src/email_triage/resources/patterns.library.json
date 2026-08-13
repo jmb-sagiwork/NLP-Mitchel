@@ -1,12 +1,13 @@
 {
-  "library_version": "0.1.0",
-  "_note": "Curated, reviewed regexes referenced from concerns.json by pattern_ref, so config authors never write raw regex. Shapes here are STARTING GUESSES; replace them with the real shapes reported by the discovery run (pipeline SP-1.1-05, patterns_found.json).",
+  "library_version": "0.2.0",
+  "_note": "Curated, reviewed regexes referenced from concerns.json by pattern_ref, so config authors never write raw regex. Shapes are STARTING GUESSES until real emails confirm them (pipeline SP-1.1-07/38). Where several fields share one pattern - DOS, DOI and DOB all use us_date - the field MUST set require_label:true, or a bare match cannot be attributed to any of them.",
   "patterns": {
-    "claim_number_generic": {
-      "description": "Claim number: 2-4 letters then 6-12 digits (optional separator), or a bare 8-12 digit run.",
-      "regex": "\\b(?:[A-Z]{2,4}[-\\s]?\\d{6,12}|\\d{8,12})\\b",
+    "us_date": {
+      "description": "US date as M/D/YYYY, M-D-YY, YYYY-MM-DD, or 'Jan 5, 2026'. Shared by date_of_service, date_of_injury and date_of_birth - all three require_label.",
+      "regex": "\\b(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})\\b",
       "flags": ["IGNORECASE"],
-      "example_matches": ["WC1234567", "ABC-00456789", "100234567"]
+      "capture_group": 1,
+      "example_matches": ["03/14/2026", "2026-03-14", "Mar 14, 2026", "3-4-26"]
     },
     "currency_amount": {
       "description": "US dollar amount, optional $ and thousands separators. A bare integer only counts as money when a $ immediately precedes it, so '42 miles' is not an amount. The comma/decimal forms are listed first so they win over the bare-integer branch - an earlier version put '$\\s?\\d+' inside the group, which let a leftmost match starting on the preceding space capture just '$1' out of '$1,250.00'. See pipeline SP-1.1-39.",
@@ -15,12 +16,33 @@
       "capture_group": 1,
       "example_matches": ["$1,250.00", "1250.00", "$45", "$ 45"]
     },
-    "us_date": {
-      "description": "US date as M/D/YYYY, M-D-YY, YYYY-MM-DD, or 'Jan 5, 2026'.",
-      "regex": "\\b(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})\\b",
+    "claim_id": {
+      "description": "Claim ID: letter-prefixed or bare alphanumeric run. Deliberately broad because the real format is unconfirmed - it therefore requires a label to be attributed. Replace with the true shape once discovery reports it.",
+      "regex": "\\b([A-Z]{1,4}[-\\s]?\\d{6,14}|\\d{7,14})\\b",
       "flags": ["IGNORECASE"],
       "capture_group": 1,
-      "example_matches": ["03/14/2026", "2026-03-14", "Mar 14, 2026"]
+      "example_matches": ["WC1234567", "ABC-00456789", "100234567"]
+    },
+    "patient_account": {
+      "description": "Patient account number: alphanumeric, provider-assigned, format varies by facility. Requires a label.",
+      "regex": "\\b([A-Z0-9][A-Z0-9-]{4,19})\\b",
+      "flags": ["IGNORECASE"],
+      "capture_group": 1,
+      "example_matches": ["ACCT-99213", "0012345678", "PA5512399"]
+    },
+    "provider_tin": {
+      "description": "Provider Tax ID (federal EIN): 9 digits, commonly written NN-NNNNNNN. The hyphenated form is listed first so it is preferred over a bare 9-digit run.",
+      "regex": "\\b(\\d{2}-\\d{7}|\\d{9})\\b",
+      "flags": [],
+      "capture_group": 1,
+      "example_matches": ["12-3456789", "123456789"]
+    },
+    "npi_number": {
+      "description": "National Provider Identifier: exactly 10 digits. Overlaps claim_id and patient_account - always require a label.",
+      "regex": "\\b(\\d{10})\\b",
+      "flags": [],
+      "capture_group": 1,
+      "example_matches": ["1234567893"]
     },
     "invoice_number": {
       "description": "Invoice or bill number, optionally prefixed.",
@@ -29,26 +51,12 @@
       "capture_group": 1,
       "example_matches": ["INV-889231", "BILL 4471002"]
     },
-    "npi_number": {
-      "description": "National Provider Identifier: exactly 10 digits.",
-      "regex": "\\b(\\d{10})\\b",
-      "flags": [],
-      "capture_group": 1,
-      "example_matches": ["1234567893"]
-    },
     "check_number": {
       "description": "Check or EFT reference number.",
       "regex": "\\b(?:check|chk|eft)\\s*#?\\s*(\\d{4,12})\\b",
       "flags": ["IGNORECASE"],
       "capture_group": 1,
       "example_matches": ["Check #558201", "EFT 99120034"]
-    },
-    "bill_type_code": {
-      "description": "UB-04 type-of-bill code: 3 or 4 digits, commonly cited as 0111 / 131. The lookarounds keep it from matching digit runs inside a currency amount ('250' out of '$1,250.00') or a longer identifier - see pipeline SP-1.1-38.",
-      "regex": "(?<![\\d,.$-])(0\\d{3}|[1-8]\\d{2})(?![\\d,.-])",
-      "flags": [],
-      "capture_group": 1,
-      "example_matches": ["0111", "131"]
     }
   }
 }

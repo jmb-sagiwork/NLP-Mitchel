@@ -71,6 +71,10 @@ class CompiledField:
     pattern: CompiledPattern | None
     label_aliases: tuple[str, ...]
     normalizer: str
+    # When several fields share one pattern - DOS, DOI and DOB are all dates -
+    # a bare pattern match cannot be attributed to any of them. Such a field
+    # accepts label-anchored candidates only, and reports nothing otherwise.
+    require_label: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,27 @@ class KeywordRule:
     weight: float
     whole_word: bool = False
     matcher: re.Pattern[str] | None = None
+
+
+@dataclass(frozen=True)
+class CompiledReason:
+    """A sub-classification within a concern.
+
+    Deliberately shares the attribute names rule_score() reads, so the same
+    scorer works on concerns and reasons without a second implementation.
+    """
+
+    id: str
+    display_name: str
+    prototypes: tuple[str, ...]
+    examples: tuple[str, ...]
+    positive: tuple[KeywordRule, ...]
+    negative: tuple[KeywordRule, ...]
+    decisive: tuple[tuple[str, ...], ...]
+
+    @property
+    def evidence_count(self) -> int:
+        return len(self.prototypes) + len(self.examples)
 
 
 @dataclass(frozen=True)
@@ -97,6 +122,7 @@ class CompiledConcern:
     gate_patterns: tuple[str, ...]
     gate_penalty: float
     fields: tuple[CompiledField, ...]
+    reasons: tuple[CompiledReason, ...] = ()
 
     @property
     def evidence_count(self) -> int:
@@ -105,6 +131,12 @@ class CompiledConcern:
     @property
     def required_field_names(self) -> tuple[str, ...]:
         return tuple(f.name for f in self.fields if f.required)
+
+    def reason(self, reason_id: str) -> CompiledReason | None:
+        for r in self.reasons:
+            if r.id == reason_id:
+                return r
+        return None
 
 
 @dataclass(frozen=True)
@@ -221,6 +253,12 @@ def _compile_field(
     )
     # Longest alias first so "claim number" wins over "claim".
     aliases = tuple(sorted(aliases, key=len, reverse=True))
+    require_label = bool(spec.get("require_label", False))
+    if require_label and not aliases:
+        raise ConfigError(
+            f"concern '{concern_id}', field '{name}': require_label is true but "
+            f"no label_aliases are declared, so the field can never match"
+        )
     return CompiledField(
         name=name,
         display_name=spec.get("display_name", name.replace("_", " ").title()),
@@ -228,6 +266,34 @@ def _compile_field(
         pattern=pattern,
         label_aliases=aliases,
         normalizer=spec.get("normalizer", "trim"),
+        require_label=require_label,
+    )
+
+
+def _compile_decisive(rules: dict[str, Any]) -> tuple[tuple[str, ...], ...]:
+    out: list[tuple[str, ...]] = []
+    for d in rules.get("decisive", []):
+        terms = tuple(str(t).strip().lower() for t in d.get("all_of", []) if str(t).strip())
+        if terms:
+            out.append(terms)
+    return tuple(out)
+
+
+def _compile_reason(spec: dict[str, Any], concern_id: str) -> CompiledReason:
+    rid = spec.get("id")
+    if not isinstance(rid, str) or not rid:
+        raise ConfigError(f"concern '{concern_id}': a reason is missing 'id'")
+    rules = spec.get("keyword_rules") or {}
+    return CompiledReason(
+        id=rid,
+        display_name=spec.get("display_name", rid),
+        prototypes=tuple(str(p) for p in spec.get("prototypes", [])),
+        examples=tuple(str(e) for e in spec.get("examples", [])),
+        positive=tuple(_compile_keyword(r, f"{concern_id}.{rid}")
+                       for r in rules.get("positive", [])),
+        negative=tuple(_compile_keyword(r, f"{concern_id}.{rid}")
+                       for r in rules.get("negative", [])),
+        decisive=_compile_decisive(rules),
     )
 
 
@@ -236,11 +302,32 @@ def _compile_concern(spec: dict[str, Any], patterns: dict[str, CompiledPattern])
     if not isinstance(cid, str) or not cid:
         raise ConfigError("a concern is missing 'id'")
     rules = spec.get("keyword_rules") or {}
-    decisive: list[tuple[str, ...]] = []
-    for d in rules.get("decisive", []):
-        terms = tuple(str(t).strip().lower() for t in d.get("all_of", []) if str(t).strip())
-        if terms:
-            decisive.append(terms)
+    decisive = list(_compile_decisive(rules))
+
+    reasons = tuple(_compile_reason(r, cid) for r in spec.get("reasons", []))
+    seen_r: set[str] = set()
+    for r in reasons:
+        if r.id in seen_r:
+            raise ConfigError(f"concern '{cid}': duplicate reason id '{r.id}'")
+        seen_r.add(r.id)
+
+    # Roll a reason's keywords up as weaker evidence for its parent concern.
+    # "Not a bill on file" is a Bill Status reason, so those words are also
+    # evidence the item IS a Bill Status - without this the concern level sees
+    # nothing and the message falls through to UNCLASSIFIED. Rolling up in code
+    # keeps "adding a reason" a pure JSON edit with no duplicated phrases.
+    rollup = float(spec.get("reason_rollup_weight", 0.5))
+    own_positive = tuple(_compile_keyword(r, cid) for r in rules.get("positive", []))
+    rolled = tuple(
+        KeywordRule(
+            phrase=kw.phrase,
+            weight=kw.weight * rollup,
+            whole_word=kw.whole_word,
+            matcher=kw.matcher,
+        )
+        for reason in reasons
+        for kw in reason.positive
+    )
     gate = spec.get("structural_gate") or {}
     gate_patterns = tuple(str(p) for p in gate.get("require_any_pattern", []))
     for p in gate_patterns:
@@ -257,12 +344,13 @@ def _compile_concern(spec: dict[str, Any], patterns: dict[str, CompiledPattern])
         description_internal=spec.get("description_internal", ""),
         prototypes=tuple(str(p) for p in spec.get("prototypes", [])),
         examples=tuple(str(e) for e in spec.get("examples", [])),
-        positive=tuple(_compile_keyword(r, cid) for r in rules.get("positive", [])),
+        positive=own_positive + rolled,
         negative=tuple(_compile_keyword(r, cid) for r in rules.get("negative", [])),
         decisive=tuple(decisive),
         gate_patterns=gate_patterns,
         gate_penalty=float(gate.get("penalty_if_absent", 0.0)),
         fields=tuple(_compile_field(f, cid, patterns) for f in spec.get("fields", [])),
+        reasons=reasons,
     )
 
 

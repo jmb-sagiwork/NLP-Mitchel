@@ -47,32 +47,47 @@ PLACEHOLDER = (
     "  The charge amount is $1,250.00 and the TOB shows 0111.\n"
 )
 
+# Synthetic. Every identifier below is invented - never paste real PHI here.
 SAMPLES = [
     (
-        "Type of bill question - claim WC1234567",
-        "Hi team,\n\nCan you confirm the type of bill for claim WC1234567? "
-        "The charge amount is $1,250.00 and the TOB shows 0111, which looks "
-        "incorrect for this service.\n\nThanks,\nMaria\n",
+        "All seven fields, fully labelled",
+        "Bill status please.\n\n"
+        "Claim ID: WC7788991\n"
+        "DOS: 05/01/2026\n"
+        "DOI: 04/02/2026\n"
+        "DOB: 11/30/1979\n"
+        "Prov TIN: 98-7654321\n"
+        "Patient Account: PA5512399\n"
+        "Expected amount: $3,410.55\n",
     ),
     (
-        "EOR request",
-        "Good morning,\n\nPlease send a copy of the explanation of review for "
-        "claim ABC-00456789, date of service 03/14/2026.\n\nRegards,\nBilling Dept\n",
+        "Bill status - completed and denied",
+        "Good morning,\n\nThis bill has completed processing and was denied. "
+        "Claim number ABC-00456789, date of service 02/02/2026, expected "
+        "amount $1,250.00.\n\nRegards,\nBilling Dept\n",
     ),
     (
-        "Reconsideration",
-        "We disagree with the reduction applied to this bill. Requesting "
-        "reconsideration for claim WC7788991, billed amount $980.50, "
-        "date of service 02/02/2026.\n",
+        "Bill status - not a bill on file",
+        "We show not a bill on file for this one. Claim ID 100234567, "
+        "DOS 01/15/2026, Prov TIN 12-3456789.\n",
     ),
     (
-        "Paraphrased - no keyword present",
-        "Hello,\n\nWondering how this charge should be categorized for billing "
-        "purposes on claim WC5551234. We billed $430.00.\n\nThank you\n",
+        "Bill status - no claim on file",
+        "No claim on file; missing information. Claim ID WC5551234.\n",
     ),
     (
-        "Missing a required field",
-        "Can you tell me the bill type for this charge? The amount is $612.75.\n",
+        "Claim information - claim number request",
+        "Claim number request - we need the claim number before we can bill.\n"
+        "Patient account ACCT-99213, DOI 01/09/2026, DOB 07/22/1984.\n",
+    ),
+    (
+        "Inbound question, no reason stated",
+        "Hi,\n\nChecking the status of the bill for Claim ID WC1234567, "
+        "DOS 03/14/2026. Can you advise?\n\nThanks\n",
+    ),
+    (
+        "Unlabelled date - must NOT be guessed",
+        "Bill status for claim ID WC1234567. We sent this over on 03/14/2026.\n",
     ),
     (
         "Not a tracked concern",
@@ -220,14 +235,18 @@ class TriageApp:
         self.concern_id_label = ttk.Label(card, text="", style="DimCard.TLabel")
         self.concern_id_label.pack(anchor="w")
 
+        ttk.Label(card, text="REASON", style="DimCard.TLabel").pack(anchor="w", pady=(14, 0))
+        self.reason_label = ttk.Label(card, text="-", style="Mono.TLabel")
+        self.reason_label.pack(anchor="w", pady=(2, 0))
+
         meter_row = ttk.Frame(card, style="Card.TFrame")
         meter_row.pack(fill="x", pady=(16, 0))
         self.meter = th.Meter(meter_row, width=260, bg=th.ELEVATED)
         self.meter.pack(side="left")
         self.conf_label = ttk.Label(meter_row, text="", style="Mono.TLabel")
         self.conf_label.pack(side="left", padx=(12, 0))
-        self.reason_label = ttk.Label(card, text="", style="DimCard.TLabel")
-        self.reason_label.pack(anchor="w", pady=(8, 0))
+        self.decision_label = ttk.Label(card, text="", style="DimCard.TLabel")
+        self.decision_label.pack(anchor="w", pady=(8, 0))
 
         # ---- fields ------------------------------------------------------
         ttk.Label(tab, text="DATA NEEDED", style="DimSurface.TLabel").pack(
@@ -314,6 +333,16 @@ class TriageApp:
             style="Dark.TCombobox", width=24, font=self.fonts.body,
         )
         self.correction_box.pack(side="left", padx=(8, 16))
+
+        ttk.Label(bar, text="Reason:", style="Dim.TLabel").pack(side="left")
+        self.reason_correction_var = tk.StringVar()
+        self.reason_correction_box = ttk.Combobox(
+            bar, textvariable=self.reason_correction_var, state="readonly",
+            style="Dark.TCombobox", width=26, font=self.fonts.body,
+        )
+        self.reason_correction_box.pack(side="left", padx=(8, 16))
+        self.reason_correction_box.configure(values=["(prediction is correct)"])
+        self.reason_correction_var.set("(prediction is correct)")
 
         ttk.Label(bar, text="Note:", style="Dim.TLabel").pack(side="left")
         self.note_var = tk.StringVar()
@@ -464,12 +493,21 @@ class TriageApp:
         review = self.engine.config.thresholds["review"] if self.engine else 0.35
         self.meter.set(result.confidence, color, ticks=(review, accept))
         self.conf_label.configure(text=f"{result.confidence:.0%}")
-        self.reason_label.configure(
-            text=f"reason: {result.explanation.reason}   |   "
+
+        if result.reason_id:
+            self.reason_label.configure(
+                text=f"{result.reason_display_name}  ({result.reason_confidence:.0%})"
+            )
+        else:
+            self.reason_label.configure(text="(none stated in this email)")
+
+        self.decision_label.configure(
+            text=f"decided by: {result.explanation.reason}   |   "
                  f"margin {result.margin:+.3f}   |   "
                  f"layers: {', '.join(result.explanation.layers_used)}   |   "
                  f"{result.elapsed_ms:.0f} ms"
         )
+        self._refresh_reason_options(result.concern_id)
 
         self.tree.delete(*self.tree.get_children())
         for f in result.fields.values():
@@ -500,6 +538,16 @@ class TriageApp:
         self._fill(self.plain_out, to_plain_text(result))
         self._fill(self.json_out, to_json(result))
         self.correction_var.set("(prediction is correct)")
+        self.reason_correction_var.set("(prediction is correct)")
+
+    def _refresh_reason_options(self, concern_id: str | None) -> None:
+        """Offer only the reasons belonging to the predicted concern."""
+        options = ["(prediction is correct)", "(no reason stated)"]
+        if self.engine and concern_id:
+            concern = self.engine.config.concern(concern_id)
+            if concern:
+                options += [r.id for r in concern.reasons]
+        self.reason_correction_box.configure(values=options)
 
     def _fill(self, widget: tk.Text, content: str) -> None:
         widget.configure(state="normal")
@@ -521,11 +569,14 @@ class TriageApp:
             return
         choice = self.correction_var.get()
         corrected = None if choice.startswith("(") else choice
+        rchoice = self.reason_correction_var.get()
+        corrected_reason = None if rchoice.startswith("(") else rchoice
         record = build_training_record(
             body=self._current_body(),
             subject=self.subject_var.get(),
             result=self.result,
             corrected_concern_id=corrected,
+            corrected_reason_id=corrected_reason,
             reviewer_note=self.note_var.get().strip(),
         )
         try:
@@ -572,22 +623,35 @@ def selftest() -> int:
         report["concern_ids"] = list(eng.concern_ids)
 
         r = eng.classify(
-            "Can you confirm the type of bill for claim WC1234567? "
-            "Charge amount is $1,250.00.",
-            subject="Type of bill question",
+            "Bill status please.\n"
+            "Claim ID: WC7788991\n"
+            "DOS: 05/01/2026\n"
+            "DOI: 04/02/2026\n"
+            "DOB: 11/30/1979\n"
+            "Prov TIN: 98-7654321\n"
+            "Patient Account: PA5512399\n"
+            "Expected amount: $3,410.55\n",
+            subject="Bill status",
         )
         report["result"] = {
             "concern_id": r.concern_id,
+            "reason_id": r.reason_id,
             "status": r.status.value,
             "confidence": round(r.confidence, 3),
             "values": r.values,
             "elapsed_ms": round(r.elapsed_ms, 1),
         }
-        report["ok"] = (
-            r.concern_id == "type_of_bill"
-            and r.values.get("claim_number") == "WC1234567"
-            and r.values.get("charge_amount") == "1250.00"
-        )
+        # Checks all seven fields, and specifically that DOS/DOI/DOB stayed
+        # distinct - the failure this bundle is most likely to regress on.
+        report["ok"] = r.concern_id == "bill_status" and r.values == {
+            "claim_id": "WC7788991",
+            "date_of_service": "2026-05-01",
+            "date_of_injury": "2026-04-02",
+            "date_of_birth": "1979-11-30",
+            "provider_tin": "987654321",
+            "patient_account": "PA5512399",
+            "expected_amount": "3410.55",
+        }
     except Exception as exc:
         import traceback
 

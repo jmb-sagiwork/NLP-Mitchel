@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .config import CompiledConcern, CompiledPattern, Config
+from .config import CompiledConcern, CompiledPattern, CompiledReason, Config
 from .textprep import PreparedText
 
 
@@ -82,11 +82,14 @@ class RuleScore:
     decisive: tuple[str, ...]
 
 
-def rule_score(concern: CompiledConcern, prepared: PreparedText, cfg: Config) -> RuleScore:
+def rule_score(
+    concern: CompiledConcern | CompiledReason, prepared: PreparedText, cfg: Config
+) -> RuleScore:
     """Weighted keyword scoring over the newest message, squashed to 0..1.
 
     Segment weights mean a hit in the subject counts nearly as much as the body,
-    while a hit in quoted history counts far less.
+    while a hit in quoted history counts far less. Accepts a concern or a reason
+    - both expose positive/negative/decisive, so one scorer serves both levels.
     """
     total = 0.0
     hits: list[str] = []
@@ -175,6 +178,9 @@ class EmbeddingLayer:
 
         self.temperature = temperature
         self._prototypes: dict[str, "object"] = {}
+        # concern_id -> reason_id -> prototype matrix. Kept separate from
+        # _prototypes so the concern softmax is not diluted by reason vectors.
+        self._reason_prototypes: dict[str, dict[str, "object"]] = {}
 
     def embed(self, texts: list[str]):
         """Masked mean pooling + L2 normalization.
@@ -211,8 +217,28 @@ class EmbeddingLayer:
             texts = list(concern.prototypes) + list(concern.examples)
             if texts:
                 self._prototypes[concern.id] = self.embed(texts)
+            for reason in concern.reasons:
+                rtexts = list(reason.prototypes) + list(reason.examples)
+                if rtexts:
+                    self._reason_prototypes.setdefault(concern.id, {})[reason.id] = (
+                        self.embed(rtexts)
+                    )
         if cfg.background_prototypes:
             self._prototypes[cfg.background_id] = self.embed(list(cfg.background_prototypes))
+
+    def reason_probabilities(self, text: str, concern_id: str) -> dict[str, float]:
+        """Softmax over the reasons of one concern only."""
+        import numpy as np
+
+        protos = self._reason_prototypes.get(concern_id)
+        if not protos:
+            return {}
+        q = self.embed([text])[0]
+        keys = list(protos)
+        vals = np.array([float(np.max(protos[k] @ q)) for k in keys], dtype=np.float32)
+        scaled = (vals - vals.max()) / max(self.temperature, 1e-6)
+        exp = np.exp(scaled)
+        return {k: float(p) for k, p in zip(keys, exp / exp.sum())}
 
     def similarities(self, text: str) -> dict[str, float]:
         """Max cosine similarity of the query against each class's prototypes."""

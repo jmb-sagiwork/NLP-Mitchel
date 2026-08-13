@@ -32,6 +32,8 @@ from .types import Explanation, LayerScore, TriageResult, TriageStatus
 # Cap applied when Layer 3 is unavailable: rules alone should not look certain.
 NO_MODEL_CONFIDENCE_CAP = 0.70
 MISSING_FIELD_PENALTY = 0.80
+# Reason scoring is rules-led; see _classify_reason.
+REASON_EMBEDDING_WEIGHT = 0.25
 
 
 class TriageEngine:
@@ -152,6 +154,17 @@ class TriageEngine:
             bg_fused = max(0.0, 0.35 - best_rules) / max(total_w, 1e-9) * w.get("rules", 0.3)
 
         ranked = sorted(scores, key=self._sort_key, reverse=True)
+
+        # A decisive rule must be able to OVERRIDE the fused ranking, not merely
+        # boost a concern that was already winning - otherwise an unambiguous
+        # "bill status" loses to whatever the embedding layer happened to prefer,
+        # which is exactly what "decisive" is supposed to prevent.
+        decisive_owners = [s for s in scores if s.decisive_hits and s.gate_satisfied]
+        is_decisive = len(decisive_owners) == 1
+        if is_decisive:
+            winner = decisive_owners[0]
+            ranked = [winner] + [s for s in ranked if s.concern_id != winner.concern_id]
+
         top = ranked[0]
         second_fused = ranked[1].fused if len(ranked) > 1 else 0.0
         competitor = max(second_fused, bg_fused)
@@ -162,14 +175,18 @@ class TriageEngine:
         confidence = top.fused * top.saturation
         reason = "threshold"
 
-        # A single decisive rule with a satisfied gate is trusted.
-        decisive_owners = [s for s in scores if s.decisive_hits and s.gate_satisfied]
-        if len(decisive_owners) == 1 and decisive_owners[0].concern_id == top.concern_id:
+        if is_decisive:
             confidence = max(confidence, 0.90 * top.saturation)
+            margin = max(margin, cfg.thresholds["margin"])
             reason = "decisive_rule"
 
         if not self.embeddings_active:
             confidence = min(confidence, NO_MODEL_CONFIDENCE_CAP)
+
+        # Sub-classify the reason within the winning concern.
+        reason_id, reason_name, reason_conf, reason_alts = self._classify_reason(
+            concern, prepared
+        )
 
         # Extraction runs after classification, then feeds back into status.
         fields, missing, ambiguous = extract_fields(concern, prepared, cfg)
@@ -202,6 +219,12 @@ class TriageEngine:
             confidence=max(0.0, min(confidence, 1.0)),
             margin=margin,
             needs_review=needs_review,
+            reason_id=reason_id if status is not TriageStatus.UNCLASSIFIED else None,
+            reason_display_name=(
+                reason_name if status is not TriageStatus.UNCLASSIFIED else None
+            ),
+            reason_confidence=reason_conf,
+            reason_alternatives=reason_alts,
             fields=fields,
             missing_fields=missing,
             ambiguous_fields=ambiguous,
@@ -225,6 +248,59 @@ class TriageEngine:
         return [self.classify(body, subject=subject) for body, subject in items]
 
     # ---- helpers ---------------------------------------------------------
+
+    def _classify_reason(
+        self, concern, prepared
+    ) -> tuple[str | None, str | None, float, tuple[tuple[str, float], ...]]:
+        """Pick the reason within an already-decided concern.
+
+        Same fusion shape as the concern level, minus the structural layer -
+        reasons are distinguished by wording, not by which identifiers appear.
+        Returns (None, None, 0.0, alts) when nothing clears the threshold, so a
+        weak reason is reported as absent rather than guessed.
+        """
+        if not concern.reasons:
+            return None, None, 0.0, ()
+
+        cfg = self.config
+        probs = (
+            self._embeddings.reason_probabilities(prepared.classify_text, concern.id)
+            if self._embeddings
+            else {}
+        )
+        # Reasons are stock dispositions stated near-verbatim ("not a bill on
+        # file"), not paraphrases, so rules lead here and embeddings only break
+        # ties. Concern-level weights would let the encoder invent a disposition
+        # the email never mentions.
+        w_emb = REASON_EMBEDDING_WEIGHT if probs else 0.0
+        w_rule = 1.0 - w_emb
+
+        scored: list[tuple[str, float]] = []
+        rule_scores: dict[str, float] = {}
+        for reason in concern.reasons:
+            rs = rule_score(reason, prepared, cfg)
+            rule_scores[reason.id] = rs.score
+            fused = w_emb * probs.get(reason.id, 0.0) + w_rule * rs.score
+            if rs.decisive:
+                fused = max(fused, 0.85)
+            sat = min(1.0, reason.evidence_count / max(cfg.evidence_saturation_k, 1))
+            scored.append((reason.id, fused * sat))
+
+        scored.sort(key=lambda x: (-x[1], x[0]))
+        alts = tuple(scored[:3])
+        best_id, best_score = scored[0]
+
+        # Softmax always hands its mass to something. An inbound question states
+        # no disposition at all, so without this an ordinary "what is the status
+        # of this bill?" gets labelled "not a bill on file". No supporting
+        # wording means no reason.
+        if rule_scores.get(best_id, 0.0) <= 0.0:
+            return None, None, 0.0, alts
+
+        if best_score < cfg.thresholds.get("reason_accept", 0.45):
+            return None, None, round(best_score, 4), alts
+        reason = concern.reason(best_id)
+        return best_id, (reason.display_name if reason else best_id), round(best_score, 4), alts
 
     def _sort_key(self, s: LayerScore):
         concern = self.config.concern(s.concern_id)

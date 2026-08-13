@@ -44,6 +44,11 @@ def to_plain_text(result: TriageResult) -> str:
     add("")
     add(f"Type of concern : {result.display_name or '(none identified)'}")
     add(f"Concern ID      : {result.concern_id or '-'}")
+    if result.reason_id:
+        add(f"Reason          : {result.reason_display_name}  "
+            f"({result.reason_confidence:.0%})")
+    else:
+        add(f"Reason          : (none stated in this email)")
     add(f"Status          : {_STATUS_GLYPH.get(result.status, '')} {result.status.value}")
     add(f"Confidence      : {result.confidence:.0%}   (margin {result.margin:+.3f})")
     add(f"Needs review    : {'YES' if result.needs_review else 'no'}")
@@ -118,6 +123,7 @@ def build_training_record(
     result: TriageResult,
     *,
     corrected_concern_id: str | None = None,
+    corrected_reason_id: str | None = None,
     corrected_fields: dict[str, str] | None = None,
     reviewer_note: str = "",
     reviewer: str = "",
@@ -130,11 +136,15 @@ def build_training_record(
     """
     predicted = result.concern_id
     corrected = corrected_concern_id or predicted
+    predicted_reason = result.reason_id
+    corrected_reason = corrected_reason_id or predicted_reason
     field_labels = {
         name: (corrected_fields or {}).get(name, f.value)
         for name, f in result.fields.items()
     }
-    verified = bool(corrected_concern_id or corrected_fields or reviewer_note)
+    verified = bool(
+        corrected_concern_id or corrected_reason_id or corrected_fields or reviewer_note
+    )
 
     return {
         "dataset_schema_version": DATASET_SCHEMA_VERSION,
@@ -149,12 +159,16 @@ def build_training_record(
         # ---- label: the training y -------------------------------------
         "label": {
             "concern_id": corrected,
+            "reason_id": corrected_reason,
             "fields": field_labels,
             "verified_by_human": verified,
             "reviewer": reviewer,
             "reviewer_note": reviewer_note,
             "was_prediction_correct": (
                 None if not verified else corrected == predicted
+            ),
+            "was_reason_correct": (
+                None if not verified else corrected_reason == predicted_reason
             ),
         },
         # ---- what the model actually said: for error analysis -----------

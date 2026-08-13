@@ -1,4 +1,4 @@
-"""Extraction tests. All fixtures are synthetic; identifiers are invented."""
+"""Extraction tests. All fixtures are synthetic; every identifier is invented."""
 
 from __future__ import annotations
 
@@ -6,6 +6,18 @@ import pytest
 
 from email_triage.extract import normalize_value
 from email_triage.types import TriageStatus
+
+# One message carrying all seven fields, each explicitly labelled.
+FULL = (
+    "Bill status please.\n"
+    "Claim ID: WC7788991\n"
+    "DOS: 05/01/2026\n"
+    "DOI: 04/02/2026\n"
+    "DOB: 11/30/1979\n"
+    "Prov TIN: 98-7654321\n"
+    "Patient Account: PA5512399\n"
+    "Expected amount: $3,410.55\n"
+)
 
 
 @pytest.mark.parametrize(
@@ -15,7 +27,7 @@ from email_triage.types import TriageStatus
         ("1250", "money", "1250.00"),
         ("$45", "money", "45.00"),
         ("wc-123 4567", "upper_alnum", "WC1234567"),
-        ("INV-889231", "digits", "889231"),
+        ("98-7654321", "digits", "987654321"),
         ("03/14/2026", "date_iso", "2026-03-14"),
         ("3-4-26", "date_iso", "2026-03-04"),
         ("2026-03-14", "date_iso", "2026-03-14"),
@@ -27,60 +39,90 @@ def test_normalizers(raw, normalizer, expected):
     assert normalize_value(raw, normalizer) == expected
 
 
-def test_label_proximity_beats_first_match(rules_engine):
-    """Two dollar figures present; the one next to 'charge amount' must win."""
-    body = (
-        "Deductible is $50.00 on this file.\n"
-        "Type of bill question for claim WC1234567.\n"
-        "Charge amount: $1,250.00\n"
+def test_all_seven_fields_extract(rules_engine):
+    r = rules_engine.classify(FULL)
+    assert r.values == {
+        "claim_id": "WC7788991",
+        "date_of_service": "2026-05-01",
+        "date_of_injury": "2026-04-02",
+        "date_of_birth": "1979-11-30",
+        "provider_tin": "987654321",
+        "patient_account": "PA5512399",
+        "expected_amount": "3410.55",
+    }
+
+
+def test_three_date_fields_are_not_confused(rules_engine):
+    """DOS, DOI and DOB share one regex. Each must get its own date, not the
+    first date in the message."""
+    r = rules_engine.classify(FULL)
+    assert r.values["date_of_service"] == "2026-05-01"
+    assert r.values["date_of_injury"] == "2026-04-02"
+    assert r.values["date_of_birth"] == "1979-11-30"
+
+
+def test_unlabelled_date_is_not_guessed(rules_engine):
+    """A bare date cannot be attributed to DOS, DOI or DOB, so report none."""
+    r = rules_engine.classify(
+        "Bill status for claim ID WC1234567. We sent this on 03/14/2026."
     )
-    r = rules_engine.classify(body)
-    assert r.concern_id == "type_of_bill"
-    assert r.fields["charge_amount"].value == "1250.00"
-    assert r.fields["charge_amount"].strategy.startswith("label_proximity")
+    assert r.values["date_of_service"] is None
+    assert r.values["date_of_injury"] is None
+    assert r.values["date_of_birth"] is None
+
+
+def test_label_word_is_not_swallowed_into_the_value(rules_engine):
+    """'Claim ID 100234567' must yield 100234567, not ID100234567 - a broad id
+    pattern will otherwise eat the label's trailing word."""
+    r = rules_engine.classify("Bill status for Claim ID 100234567, DOS 03/14/2026.")
+    assert r.values["claim_id"] == "100234567"
+
+
+def test_longer_alias_wins_over_shorter_one(rules_engine):
+    r = rules_engine.classify("Bill status. Claim Number: ABC-00456789. DOS: 02/02/2026.")
+    assert r.values["claim_id"] == "ABC00456789"
+
+
+def test_provider_tin_prefers_hyphenated_form(rules_engine):
+    r = rules_engine.classify(FULL)
+    assert r.values["provider_tin"] == "987654321"
+    assert r.fields["provider_tin"].raw == "98-7654321"
+
+
+def test_amount_is_found_without_a_label(rules_engine):
+    """expected_amount does not set require_label - currency is unambiguous."""
+    r = rules_engine.classify(
+        "Bill status for claim ID WC1234567. The charge was $1,250.00."
+    )
+    assert r.values["expected_amount"] == "1250.00"
 
 
 def test_missing_required_field_is_reported_not_relabelled(rules_engine):
-    """No claim number anywhere. The label must stay, the gap must surface."""
-    body = "Can you tell me the type of bill for this charge? The amount is $612.75."
-    r = rules_engine.classify(body)
-    assert r.concern_id == "type_of_bill", "label must not change because a field is missing"
-    assert "claim_number" in r.missing_fields
+    """No claim id anywhere. The label must stay, the gap must surface."""
+    r = rules_engine.classify("Can you check the status of this bill on file?")
+    assert r.concern_id == "bill_status", "label must not change over a missing field"
+    assert "claim_id" in r.missing_fields
     assert r.needs_review is True
-    assert r.fields["claim_number"].value is None
-
-
-def test_bill_type_code_does_not_match_inside_currency(rules_engine):
-    """Regression: '250' was being extracted out of '$1,250.00'."""
-    body = "Type of bill for claim WC1234567, charge amount $1,250.00."
-    r = rules_engine.classify(body)
-    assert r.fields["bill_type_code"].value is None
-
-
-def test_bill_type_code_still_matches_a_real_code(rules_engine):
-    body = "Type of bill 0111 for claim WC1234567, charge amount $1,250.00."
-    r = rules_engine.classify(body)
-    assert r.fields["bill_type_code"].value == "0111"
+    assert r.fields["claim_id"].value is None
 
 
 def test_value_from_quoted_history_is_flagged(rules_engine):
-    """Claim number only exists in the quoted reply chain."""
     body = (
-        "Following up on the type of bill for this one, charge amount $980.50.\n"
+        "Following up on the bill status for this one.\n"
         "\n"
         "On Mon, Mar 2, 2026 at 9:02 AM Adjuster wrote:\n"
-        "> Opening claim WC7788991 for review.\n"
+        "> Opening Claim ID WC7788991 for review.\n"
     )
     r = rules_engine.classify(body)
-    assert r.fields["claim_number"].value == "WC7788991"
-    assert r.fields["claim_number"].from_history is True
+    assert r.values["claim_id"] == "WC7788991"
+    assert r.fields["claim_id"].from_history is True
     assert r.needs_review is True
 
 
 def test_spans_point_into_the_prepared_text(rules_engine):
-    body = "Type of bill for claim WC1234567, charge amount $1,250.00."
+    body = "Bill status for Claim ID WC1234567, DOS 01/15/2026."
     r = rules_engine.classify(body)
-    span = r.fields["claim_number"].span
+    span = r.fields["claim_id"].span
     assert span is not None
     assert body[span[0] : span[1]] == "WC1234567"
 

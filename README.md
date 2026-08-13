@@ -3,15 +3,19 @@
 Reads an email, decides **what type of concern** it expresses, and extracts **the
 data that concern requires**. Runs fully offline on CPU.
 
-Example: concern `Type of Bill` requires `claim_number` and `charge_amount`.
+Example: concern **Bill Status** carries a reason (`not a bill on file`, `completed processing and denied`, ...) and seven fields: Claim ID, DOS, Patient Account, Prov TIN, Expected Amount, DOI, DOB.
 
 ```python
 from email_triage import classify_email
 
 result = classify_email(body, subject=subject)
 
-result.concern_id        # "type_of_bill"
-result.values            # {"claim_number": "WC1234567", "charge_amount": "1250.00"}
+result.concern_id        # "bill_status"
+result.reason_id         # "not_a_bill_on_file"  (None if the email states none)
+result.values            # {"claim_id": "WC7788991", "date_of_service": "2026-05-01",
+                         #  "date_of_injury": "2026-04-02", "date_of_birth": "1979-11-30",
+                         #  "provider_tin": "987654321", "patient_account": "PA5512399",
+                         #  "expected_amount": "3410.55"}
 result.missing_fields    # ()
 result.needs_review      # False
 result.to_dict()         # fully JSON-serialisable
@@ -24,7 +28,7 @@ That is the whole integration surface. Everything else is internal.
 ```bash
 py -3.14 scripts/fetch_model.py     # one time, needs internet (23 MB)
 py -3.14 run_ui.py                  # demo window
-py -3.14 -m pytest -q               # 39 tests
+py -3.14 -m pytest -q               # 57 tests
 ```
 
 Without the model the engine still runs on regex + rules and caps confidence at
@@ -76,6 +80,24 @@ Layer 3 is why **adding a concern type needs no training**. You describe the
 concern in plain English in `concerns.json`; classification is cosine similarity
 against that description. See `tests/test_add_concern.py` — it adds a whole new
 concern type with zero code and asserts it classifies.
+
+### Two levels: concern, then reason
+
+**Concern** is what the item is about (Bill Status, Claim Information). **Reason**
+is the sub-classification within it, scored by the same engine but rules-led --
+reasons are stock phrases stated near-verbatim, not paraphrases.
+
+A reason is emitted **only when wording supports it**. Softmax always hands its
+mass to something, so without that guard an ordinary "what is the status of this
+bill?" gets labelled "not a bill on file". No supporting wording, no reason.
+
+### Fields that share a regex must require a label
+
+DOS, DOI and DOB all resolve to one date pattern; Claim ID, Patient Account and
+Prov TIN are all digit runs. Those fields set `require_label: true`, so they
+accept only label-anchored values and report nothing otherwise. An unattributable
+match is worse than a gap -- assigning the first date in the body to all three
+date fields is a silent, confident error.
 
 ### Two behaviours that look like bugs but are not
 

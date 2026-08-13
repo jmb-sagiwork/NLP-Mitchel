@@ -107,49 +107,80 @@ def _segment_priority(kind: str) -> float:
     }.get(kind, 0.4)
 
 
+def _label_spans(field: CompiledField, low: str) -> list[tuple[int, int, str]]:
+    """Locate label aliases, longest first, without double-claiming a region.
+
+    Aliases arrive sorted longest-first, so "claim id" claims its text before
+    the bare "claim" can, and the shorter alias inside it is discarded. Without
+    this the anchor lands mid-label and the value search starts too early.
+    """
+    spans: list[tuple[int, int, str]] = []
+    for alias in field.label_aliases:
+        for m in re.finditer(rf"\b{re.escape(alias)}\b", low):
+            if any(m.start() < le and m.end() > ls for ls, le, _ in spans):
+                continue
+            spans.append((m.start(), m.end(), alias))
+    return spans
+
+
 def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[Candidate]:
     if field.pattern is None:
         return []
     out: list[Candidate] = []
     for seg in prepared.segments:
         seg_w = _segment_priority(seg.kind)
-        low = seg.text.lower()
+        labels = _label_spans(field, seg.text.lower())
+        claimed: list[tuple[int, int]] = []
 
-        # Where does each label alias appear?
-        label_spans: list[tuple[int, int, str]] = []
-        for alias in field.label_aliases:
-            for m in re.finditer(rf"\b{re.escape(alias)}\b", low):
-                label_spans.append((m.start(), m.end(), alias))
+        # --- label-anchored: search the window AFTER each label -------------
+        # Searching the window rather than filtering global matches matters:
+        # "Claim ID 100234567" makes a broad id pattern match "ID 100234567",
+        # and there is no second, non-overlapping match to fall back to.
+        for ls, le, alias in labels:
+            window = seg.text[le : le + _LABEL_WINDOW]
+            for raw, (ws, we) in field.pattern.finditer(window):
+                value = normalize_value(raw, field.normalizer)
+                if not value:
+                    continue
+                s, e = le + ws, le + we
+                proximity = 1.0 - (ws / (_LABEL_WINDOW + 1))
+                out.append(
+                    Candidate(
+                        raw=raw,
+                        value=value,
+                        span=(seg.offset + s, seg.offset + e),
+                        segment=seg.kind,
+                        strategy=f"label_proximity:{alias}",
+                        score=round(seg_w * (0.70 + 0.30 * proximity), 4),
+                    )
+                )
+                claimed.append((s, e))
+                break  # nearest match after the label wins
 
+        if field.require_label:
+            # Shared pattern (DOS/DOI/DOB, claim_id/patient_account/TIN): an
+            # unlabelled match cannot be attributed to one field, so drop it.
+            # Reporting nothing beats reporting the wrong date.
+            continue
+
+        # --- unanchored fallback -------------------------------------------
         for raw, (s, e) in field.pattern.finditer(seg.text):
+            if any(s < ce and e > cs for cs, ce in claimed):
+                continue
+            if any(s < le and e > ls for ls, le, _ in labels):
+                continue
             value = normalize_value(raw, field.normalizer)
             if not value:
                 continue
-            best_label: tuple[int, str] | None = None
-            for ls, le, alias in label_spans:
-                # Value should follow the label within the window.
-                if le <= s <= le + _LABEL_WINDOW:
-                    dist = s - le
-                    if best_label is None or dist < best_label[0]:
-                        best_label = (dist, alias)
-            if best_label is not None:
-                dist, alias = best_label
-                proximity = 1.0 - (dist / (_LABEL_WINDOW + 1))
-                score = seg_w * (0.70 + 0.30 * proximity)
-                strategy = f"label_proximity:{alias}"
-            else:
-                # Earlier in the segment is mildly better than later.
-                position = 1.0 - min(s / max(len(seg.text), 1), 1.0)
-                score = seg_w * (0.30 + 0.15 * position)
-                strategy = "pattern_only"
+            position = 1.0 - min(s / max(len(seg.text), 1), 1.0)
             out.append(
                 Candidate(
                     raw=raw,
                     value=value,
                     span=(seg.offset + s, seg.offset + e),
                     segment=seg.kind,
-                    strategy=strategy,
-                    score=round(score, 4),
+                    strategy="pattern_only",
+                    score=round(seg_w * (0.30 + 0.15 * position), 4),
                 )
             )
     return out

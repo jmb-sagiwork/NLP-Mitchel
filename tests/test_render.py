@@ -11,7 +11,7 @@ from email_triage.render import (
     text_fingerprint,
 )
 
-BODY = "Type of bill for claim WC1234567, charge amount $1,250.00."
+BODY = "Bill status for Claim ID WC1234567, DOS 03/14/2026."
 
 
 def test_unverified_record_mirrors_the_prediction(rules_engine):
@@ -27,13 +27,13 @@ def test_unverified_record_mirrors_the_prediction(rules_engine):
 def test_correction_marks_the_row_verified_and_wrong(rules_engine):
     r = rules_engine.classify(BODY)
     rec = build_training_record(
-        BODY, "", r, corrected_concern_id="payment_status", reviewer_note="mislabelled"
+        BODY, "", r, corrected_concern_id="claim_information", reviewer_note="mislabelled"
     )
-    assert rec["label"]["concern_id"] == "payment_status"
+    assert rec["label"]["concern_id"] == "claim_information"
     assert rec["label"]["verified_by_human"] is True
     assert rec["label"]["was_prediction_correct"] is False
     # The original prediction is retained for error analysis.
-    assert rec["prediction"]["concern_id"] == "type_of_bill"
+    assert rec["prediction"]["concern_id"] == "bill_status"
 
 
 def test_confirmation_marks_the_row_verified_and_right(rules_engine):

@@ -46,7 +46,7 @@ def test_new_concern_type_needs_only_a_json_edit(tmp_path):
             "decisive": [{"all_of": ["mileage reimbursement"]}],
         },
         "structural_gate": {
-            "require_any_pattern": ["claim_number_generic"],
+            "require_any_pattern": ["claim_id"],
             "penalty_if_absent": 0.25,
         },
         "fields": [
@@ -54,7 +54,7 @@ def test_new_concern_type_needs_only_a_json_edit(tmp_path):
                 "name": "claim_number",
                 "display_name": "Claim Number",
                 "required": True,
-                "pattern_ref": "claim_number_generic",
+                "pattern_ref": "claim_id",
                 "label_aliases": ["claim number", "claim #", "claim"],
                 "normalizer": "upper_alnum",
             },
@@ -89,12 +89,12 @@ def test_disabling_a_concern_removes_it_from_scoring(tmp_path):
     shutil.copy(PATTERNS_PATH, tmp_path / "patterns.library.json")
     cfg = json.loads(CONCERNS_PATH.read_text(encoding="utf-8"))
     for c in cfg["concerns"]:
-        if c["id"] == "type_of_bill":
+        if c["id"] == "bill_status":
             c["enabled"] = False
     p = tmp_path / "concerns.json"
     p.write_text(json.dumps(cfg), encoding="utf-8")
 
     eng = TriageEngine(config_path=p, enable_embeddings=False)
-    assert "type_of_bill" not in eng.concern_ids
-    r = eng.classify("Type of bill for claim WC1234567, charge amount $1,250.00.")
-    assert r.concern_id != "type_of_bill"
+    assert "bill_status" not in eng.concern_ids
+    r = eng.classify("Bill status for Claim ID WC1234567, DOS 03/14/2026.")
+    assert r.concern_id != "bill_status"
