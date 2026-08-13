@@ -23,6 +23,9 @@ result.to_dict()         # fully JSON-serialisable
 
 That is the whole integration surface. Everything else is internal.
 
+See [`TECH_STACK.md`](TECH_STACK.md) for the full stack walkthrough and the four
+levers for teaching the engine without writing code.
+
 ## Quick start
 
 ```bash
