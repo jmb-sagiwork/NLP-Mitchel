@@ -1,0 +1,97 @@
+# Email Triage NLP Pipeline
+
+This is the active work-item pipeline for the Email Triage NLP module (email body → concern classification → field extraction).
+
+**ID rule:** every item gets a permanent, incrementing ID — `SP-1.1-NN`. When adding a new item, use the next number after the highest ID used anywhere in this file or `completed.md`. IDs are never reused or renumbered, even after an item moves to `completed.md`.
+
+**Status legend:** `[ ]` not started · `[~]` in progress · `[X]` completed
+
+**Working loop:** `plan → code → test → discover → list`. Every item runs through the full loop. The `discover` step is not optional: after testing, actively look for what the work surfaced, and list any findings back into this file as new items before closing the current one.
+
+**Completed-item format:** When an item is finished, cut it from its active-priority section and append it under **Completed** at the bottom using exactly: `- [X] [Date Completed: MM/DD/YYYY] **SP-1.1-NN — Item title.** Supporting note.`
+
+**Completed-item date placement:** Repeat the same `[Date Completed: MM/DD/YYYY]` marker at the end of the completed item line.
+
+**Follow-up rule:** if finishing one item surfaces a risk, a possible bug, or a worthwhile improvement that's out of scope for that item, add it here as a new item and note which item's execution uncovered it — don't expand the item you were shipping to cover it.
+
+**Closing an item:** note the test or packaged-build evidence that shows it works when you check it off.
+
+---
+
+## High Priority
+
+**Phase 0 — Unblock**
+
+- [~] **SP-1.1-02 — Pin the project interpreter explicitly.** Two different Python 3.14 installs exist: `C:\Python314\python.exe` (3.14.5, on PATH, no onnxruntime) and `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe` (3.14.4, has it). A bare `python` in Git Bash hits the sparse one. **Done so far:** documented in `README.md`, and every script/command uses `py -3.14`. **Remaining:** no enforcement — add a startup guard that fails with a clear message when `onnxruntime` is importable but the interpreter is not the pinned one.
+- [ ] **SP-1.1-03 — Write `preflight.py` and collect results from one real end-user machine.** Reports `sys.version`, `platform.machine()`, whether `pip` is importable, whether `%WINDIR%\System32\VCRUNTIME140_1.dll` and `MSVCP140.dll` exist, and AV health. **This BLOCKS SP-1.1-31 (wheelhouse):** onnxruntime does not bundle the MSVC runtime and loads it by name. Drop the Outlook-registration check — see SP-1.1-43.
+- [ ] **SP-1.1-07 — Replace the placeholder taxonomy in `concerns.json` with the real one.** Only `type_of_bill` is confirmed. `eor_request`, `bill_reconsideration`, and `payment_status` are marked `draft: true` and exist so the demo has something to discriminate against. They must be replaced with the real concern types and their real required fields once sample emails are available. `check-config` already flags every draft concern.
+- [ ] **SP-1.1-43 — Decide how mail actually gets in, now that the client uses web-based email.** Outlook COM (SP-1.1-27..30) is no longer a safe assumption. Evaluate, in order of preference: (a) an export/forward rule dropping `.eml` into a watched folder, (b) IMAP/Graph against the webmail backend, (c) browser automation as a last resort — scraping is brittle, breaks on every UI change, and may violate the mail provider's terms, so it needs explicit sign-off before any work starts. The `classify_email(body, subject=...)` contract is deliberately independent of this, so the NLP is unblocked either way. *(Raised when the user reported the client is on a web-based mail system.)*
+
+---
+
+## Normal Priority
+
+**Phase 1 — Core data layer**
+
+- [ ] **SP-1.1-08 — Define `EmailRecord` and the `MailSource` Protocol.** Deferred with SP-1.1-43, but still wanted: a single dataclass that every input adapter produces means the UI, an `.eml` reader, and any future mail source all feed the same engine. The engine currently takes `(body, subject)` strings directly, which is fine for one adapter and will not stay fine for three.
+- [ ] **SP-1.1-09 — Implement `EmlMailSource` using the stdlib `email` package.** No `extract-msg` dependency. Likely the first real adapter given SP-1.1-43 option (a).
+- [ ] **SP-1.1-11 — Implement HTML-to-text normalization.** `textprep.normalize` handles plain text only. Web-based mail will arrive as HTML far more often than Outlook plain-text bodies did. Preserve two-column tables as `key: value` — that structure is where required fields often live.
+
+**Phase 2 — Config and embeddings**
+
+- [~] **SP-1.1-12 — Build `concerns.schema.json`, the config loader, and the `check-config` CLI.** **Done:** `config.py` validates and compiles with human-readable errors (unknown `pattern_ref`, duplicate ids, bad capture groups), and `python -m email_triage check-config` reports warnings. **Remaining:** no formal JSON Schema file yet — validation is programmatic, so an editor cannot offer completion or inline errors to a non-programmer.
+- [~] **SP-1.1-13 — Build `patterns.library.json` and the regex safety linter.** **Done:** seven curated patterns referenced by `pattern_ref`; `concerns.json` contains no raw regex. **Remaining:** no ReDoS heuristics and no timing probe.
+- [~] **SP-1.1-14 — Build `fetch_model.py` and the model manifest.** **Done:** plain `urllib` (no `huggingface_hub`), SHA256 recorded on first fetch and verified on every later run, refuses to write on mismatch, `--verify-only` mode. **Remaining:** `REVISION` is pinned to `"main"`, not a commit SHA, so the artifact is not yet reproducible. Fix before any release build.
+- [~] **SP-1.1-16 — Cache prototypes to `prototypes.npz` stamped with `model_sha256`.** **Done:** the correctness requirement is met — `EmbeddingLayer.fit_prototypes` embeds prototypes with the exact session that scores queries, so int8 prototypes are never compared against fp32 queries. **Remaining:** prototypes are recomputed on every engine construction (~1 s for 4 concerns; it will not scale to 30) and there is no persisted `.npz` and no hash guard to catch a swapped model file.
+- [ ] **SP-1.1-17 — Run the fp32-vs-int8 accuracy gate.** Needs ~150 locally-held labelled emails, so it is blocked on real data. Require Δaccuracy ≤ 1 pp and mean cosine(fp32, int8) ≥ 0.99. Fall back to the 86 MB fp32 model if it fails.
+- [ ] **SP-1.1-39 — Add a pattern-library self-test.** Every entry in `patterns.library.json` carries `example_matches`, and nothing asserts they actually match. Add a test that iterates the library, asserts each example matches its own regex and yields the expected capture group, and add a `counter_examples` key asserting the regex does *not* match those. **Both regex bugs found so far would have been caught by this test for free.** *(Uncovered while testing SP-1.1-22: the currency regex captured `$1` out of `$1,250.00` because the leftmost match started on the preceding space, where only the `\$\s?\d+` branch fit.)*
+- [ ] **SP-1.1-38 — Resolve numeric pattern collisions.** `bill_type_code` was matching `250` inside `$1,250.00`; fixed with lookarounds, but the general problem stands. `claim_number_generic` accepts a bare `\d{8,12}` run, which **structurally overlaps `npi_number` (`\d{10}`)** and `invoice_number` — a 10-digit claim number and an NPI are indistinguishable to the current library. Either constrain the shapes once discovery reports the real formats, or add a disambiguation pass that uses label proximity to assign an ambiguous numeric run to exactly one field. *(Uncovered while testing SP-1.1-18/22.)*
+
+**Phase 3 — Privacy gates**
+
+- [ ] **SP-1.1-24 — Add the socket-poisoning and import-graph tests.** Monkeypatch `socket.socket.__init__`, `create_connection`, and `getaddrinfo` to raise, then run the full pipeline; any network attempt fails the build. Separately assert `sys.modules` contains none of `requests`, `urllib3`, `httpx`, `huggingface_hub`, `hf_xet`, `fastembed`, `transformers`, `torch`. The design already avoids these (`Tokenizer.from_file`, never `from_pretrained`) — **this test is what turns that from a claim into a guarantee, and it is the artifact to show a compliance reviewer.** Note `scripts/fetch_model.py` uses `urllib` by design and must be excluded from the runtime assertion.
+- [ ] **SP-1.1-25 — Build the redaction module and safe logging.** `redact(text, level)` with stable placeholders; detectors for SSN/phone/email/address/DOB/claim/NPI/TIN. Log events keyed by a hash, never body text or extracted values. `render.text_fingerprint` already exists as the hashing primitive.
+- [ ] **SP-1.1-26 — Add the fixture PII scanner to CI.** Regex sweep over `tests/` and `data/` staged files for SSN, DOB, claim, phone, and email patterns; fail on any hit. **Raised in priority by SP-1.1-41:** `data/dataset.jsonl` now accumulates real pasted email bodies on disk. It is gitignored, but a scanner is the backstop against someone committing it with `-f`.
+- [ ] **SP-1.1-44 — Add a PHI warning to the UI's Teach bar.** Saving a training row writes the full email body to `data/dataset.jsonl` in plaintext. The UI currently gives no indication that this is happening or that the file must stay local. Add a one-line notice next to the save button and a first-run confirmation. *(Uncovered while implementing SP-1.1-41.)*
+
+**Phase 4 — Mail integration (ON HOLD pending SP-1.1-43)**
+
+- [ ] **SP-1.1-27 — Implement `OutlookMailSource` with a two-phase `GetTable()` read.** ON HOLD. Retain the design notes: `Folder.GetTable()` + `GetArray(500)` is 10–50× faster than per-item property reads and never materializes a `MailItem`, which structurally eliminates accidental side effects.
+- [ ] **SP-1.1-28 — Implement three-tier folder resolution.** ON HOLD. Cached `(entry_id, store_id)` → explicit config → discovery across all stores. Ambiguous matches must raise, not guess.
+- [ ] **SP-1.1-29 — Enforce and prove read-only behavior.** ON HOLD. Applies to any adapter that touches a live mailbox, including IMAP — reading must not flip unread state.
+- [ ] **SP-1.1-30 — Handle COM failure modes.** ON HOLD. Late binding only; assert the process is not elevated; retry on `RPC_E_SERVERCALL_RETRYLATER`; never `Items.Restrict()` with a date literal (locale-dependent parsing gives silently wrong results).
+
+---
+
+## Low Priority
+
+**Phase 5 — Packaging and delivery**
+
+- [ ] **SP-1.1-31 — Build the multi-ABI offline wheelhouse and `install.ps1`.** cp311/312/313/314; `pip install --no-index --require-hashes --user`. ~155 MB ZIP. **Blocked by SP-1.1-03.** PyInstaller is disqualified as the primary deliverable because a frozen exe cannot be imported by a host's `main.py`; it stays as Plan B (stdio-JSON sidecar).
+- [ ] **SP-1.1-32 — Dry-run the offline install on the bare Python 3.11.9.** `%LOCALAPPDATA%\Python\pythoncore-3.11-64\` is present and effectively empty — a free, realistic end-user-machine simulator. Do this before shipping anything.
+- [ ] **SP-1.1-33 — Write `DEPLOYMENT.md`.** Bundle build steps, install runbook, VC++ redist prerequisite, rollback path.
+- [ ] **SP-1.1-34 — Extend the CLI.** `ui`, `check-config`, and `classify` exist. Add `doctor` (interpreter, model hash, config version, adapter reachability) and a batch mode over a folder of `.eml`.
+- [ ] **SP-1.1-35 — Add the determinism test.** *(Partly done under SP-1.1-23: `test_determinism` asserts identical output for identical input with embeddings off. Extend it to cover the embedding path, which is where float non-determinism would actually appear.)*
+- [ ] **SP-1.1-37 — Add `results_to_dataframe()` as an optional pandas extra.** Lazy `import pandas` inside the function body; 62 MB must stay out of the runtime dependency set.
+- [ ] **SP-1.1-45 — Add a training/tuning script that consumes `data/dataset.jsonl`.** The capture format shipped in SP-1.1-41, but nothing reads it yet. Minimum useful version: filter to `verified_by_human`, report per-concern precision/recall, list every `was_prediction_correct: false` row with its per-layer scores, and suggest which concerns need more prototypes. This closes the loop the Teach bar opens. *(Uncovered while implementing SP-1.1-41.)*
+
+---
+
+**Next available ID: `SP-1.1-46`**
+
+---
+
+**Completed**
+
+- [X] [Date Completed: 08/14/2026] **SP-1.1-01 — Initialize the repository and project scaffolding.** `git init` on `main`, `.gitignore` covering model weights / `data/` / `*.jsonl` / wheelhouse artifacts, `pyproject.toml` with `requires-python = ">=3.11,<3.15"` and ruff `target-version = "py311"`, `src/` layout, `README.md`. **Evidence:** `py -3.14 -m pytest -q` collects and runs 39 tests from a clean checkout. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-10 — Implement thread segmentation and signature stripping.** `textprep.prepare` splits subject / newest body / signature / quoted history into ordered segments with stable absolute offsets, so extraction spans point into the prepared text. Reply markers cover `On … wrote:`, `-----Original Message-----`, forwarded headers, and `From:`/`Sent:` blocks. A `Thanks,` in the first third of a message is treated as a greeting, not a sign-off. **Evidence:** `test_value_from_quoted_history_is_flagged` — the claim number exists only in the quoted chain, is recovered, and is flagged `from_history=True` with `needs_review=True`. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-18 — Implement Layer 1, structural detectors.** Every library pattern runs over every segment; hits carry absolute spans and are surfaced in `explanation.pattern_hits`. Feeds both the structural score and the extraction candidates. **Evidence:** `test_spans_point_into_the_prepared_text` asserts `body[span[0]:span[1]] == "WC1234567"`. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-19 — Implement Layer 2, keyword and phrase rules.** Weighted positive/negative phrases with segment weighting, sub-linear repeat credit (`1 + log n`), and `tanh` squash. `decisive` rules short-circuit when exactly one concern fires one. **Evidence:** the full suite passes with `enable_embeddings=False`, i.e. rules alone classify all fixtures correctly. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-20 — Implement score fusion with evidence shrinkage.** `0.60·embedding + 0.30·rules + 0.10·structural`, renormalized when Layer 3 is absent, then `× min(1, (prototypes + examples) / 4)`. Missing model drops the embedding weight and caps confidence at 0.70 instead of failing. **Evidence:** `test_evidence_shrinkage_caps_a_thin_concern` builds a one-prototype concern and asserts `saturation == 0.25` and `confidence <= 0.25`; `test_confidence_capped_without_embedding_layer` asserts the 0.70 cap. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-21 — Implement the decision ladder and status model.** `CLASSIFIED` / `AMBIGUOUS` / `UNCLASSIFIED` / `ERROR`, a `needs_review` flag, an `__other__` background class that competes as a real option, and a deterministic tie-break chain with no RNG. **Evidence:** `test_chit_chat_is_not_forced_into_a_concern` returns `UNCLASSIFIED` with `concern_id is None`; `test_force_review_leaves_scores_intact` confirms `force_review` sets the flag without changing the label. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-22 — Implement the field extraction engine.** Label-proximity and pattern-only strategies compete per field; segment priority, label distance, and position rank candidates; normalizers for money, ISO dates, digits, and upper-alnum. A missing required field sets `needs_review` and multiplies confidence by 0.80 but **never changes the label**. **Evidence:** `test_label_proximity_beats_first_match` (two dollar figures present, the one beside "Charge amount" wins) and `test_missing_required_field_is_reported_not_relabelled`. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-23 — Build the public API surface.** `classify_email(body, *, subject, message_key, engine)`, `classify_emails`, `TriageEngine`, `get_default_engine`, and a fully JSON-serializable `TriageResult.to_dict()` carrying values, spans, per-layer scores, and alternatives. **Evidence:** `test_module_level_function_works`; `echo "…" | py -3.14 -m email_triage classify --json` returns the documented shape. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-36 — Add `test_add_concern.py`.** Proves the core product claim: a brand-new concern type (`mileage_reimbursement`, with its own prototypes, keyword rules, structural gate, and two required fields) is added **by JSON edit alone**, then classified correctly with both fields extracted — no code change, no retraining. A companion test asserts `enabled: false` removes a concern from scoring. **Evidence:** both tests pass. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-40 — Build the Tkinter demo UI.** Stands in for the unsettled mail integration: paste a body, get the concern, the required-field table, per-layer scores, plain-text output, and JSON. Dark flat theme over ttk `clam` with drawn rounded status pills and a confidence meter showing the review/accept thresholds. Engine loads and classification runs off the UI thread so the window never blocks on a cold ORT session. Six built-in samples cover a clean hit, a paraphrase with no keyword, a missing required field, and non-tracked chit-chat. **Evidence:** scripted end-to-end run builds the widget tree, loads the engine, classifies, and asserts rendered widget state for all six samples with no exceptions; `test_label_proximity_beats_first_match` covers the underlying result. Note the fix: a `self._w` attribute on the meter canvas clobbered Tkinter's internal widget path and broke `pack`. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-41 — Build the training-record capture format.** `build_training_record` / `append_training_record` write one JSONL row per reviewed email holding the verbatim input, the human's label, and the full prediction with per-layer scores and spans. `verified_by_human` and `was_prediction_correct` let a later training run filter to human-confirmed rows and isolate the error set. Wired to the UI's Teach bar (correct-concern dropdown + note + save). **Evidence:** `tests/test_render.py` — five tests covering the unverified/corrected/confirmed cases, JSONL round-trip, and fingerprint stability. [Date Completed: 08/14/2026]
+- [X] [Date Completed: 08/14/2026] **SP-1.1-42 — Build the model fetch script and activate Layer 3.** `scripts/fetch_model.py` downloads `all-MiniLM-L6-v2` `model_quint8_avx2.onnx` (23.0 MB) + tokenizer via plain `urllib`, records SHA256 to `MANIFEST.json`, and verifies on later runs. AVX2 rather than AVX512-VNNI because target CPUs are unknown/older. `EmbeddingLayer` does masked mean pooling + L2 normalization in numpy over `last_hidden_state`, with ORT telemetry disabled, CPU provider pinned, and thread spinning off. **Evidence:** engine reports `embeddings_active=True`, `layers_used=('embeddings','structural','rules')`; the paraphrased sample "how should this charge be **categorized for billing**" — which contains no rule keyword at all — still reaches `type_of_bill`, which is the layer demonstrably earning its place. Partial follow-ups tracked in SP-1.1-14 and SP-1.1-16. [Date Completed: 08/14/2026]

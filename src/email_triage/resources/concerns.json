@@ -1,0 +1,312 @@
+{
+  "config_version": "0.1.0",
+  "schema_version": "1.0.0",
+  "updated": "2026-08-14",
+
+  "_HOW_TO_ADD_A_CONCERN": [
+    "1. Copy any block in 'concerns' and give it a new unique 'id' and 'display_name'.",
+    "2. Write 3-5 'prototypes': plain-English sentences describing what the sender wants.",
+    "   These are what the embedding layer matches against. Write them as descriptions,",
+    "   not as keywords. This is the whole ML authoring surface - no training, no code.",
+    "3. Add 'examples': short real-ish phrasings you have actually seen (identifiers faked).",
+    "4. Add 'keyword_rules.positive' phrases that are strong giveaways.",
+    "5. List 'fields' the concern needs. Reference a pattern by 'pattern_ref' from",
+    "   patterns.library.json - do not write regex here.",
+    "6. Run: python -m email_triage check-config",
+    "NOTE: confidence is shrunk when a concern has fewer than 4 prototypes+examples",
+    "combined, so a thin concern always routes to human review until you flesh it out.",
+    "That is deliberate - see pipeline SP-1.1-20."
+  ],
+
+  "_DRAFT_WARNING": "Only 'type_of_bill' is a CONFIRMED concern type from the user. The other three are PLACEHOLDERS with draft=true so the demo has something to discriminate against. Replace them with the real taxonomy after the discovery run (pipeline SP-1.1-07).",
+
+  "defaults": {
+    "thresholds": {
+      "accept": 0.55,
+      "margin": 0.12,
+      "review": 0.35,
+      "field_ambiguity_delta": 0.10
+    },
+    "fusion_weights": {
+      "embedding": 0.60,
+      "rules": 0.30,
+      "structural": 0.10
+    },
+    "embedding_temperature": 0.05,
+    "evidence_saturation_k": 4,
+    "search_quoted_history": true,
+    "history_decay": 0.9,
+    "segment_weights": {
+      "subject": 0.90,
+      "newest_body": 1.00,
+      "signature": 0.30,
+      "quoted_history": 0.55
+    }
+  },
+
+  "background_class": {
+    "id": "__other__",
+    "display_name": "Other / not a tracked concern",
+    "prototypes": [
+      "Thanks, received. I will get back to you shortly.",
+      "Please see the attached document for your records.",
+      "Scheduling a meeting to discuss this next week.",
+      "I am out of the office and will return on Monday.",
+      "Automated notification: your request has been processed.",
+      "Acknowledging receipt of your message below."
+    ]
+  },
+
+  "concerns": [
+    {
+      "id": "type_of_bill",
+      "display_name": "Type of Bill",
+      "enabled": true,
+      "draft": false,
+      "priority": 10,
+      "description_internal": "Sender asks which bill type a charge falls under, or submits a bill that needs its type-of-bill code categorized or corrected.",
+      "prototypes": [
+        "The sender is asking which type of bill applies to a submitted charge on a workers compensation claim.",
+        "A provider or adjuster wants to know how a specific charge amount on a claim should be classified by bill type.",
+        "Question about the type of bill code assigned to a billed charge for a claim.",
+        "The sender says the type of bill on a submitted claim is wrong and needs to be corrected."
+      ],
+      "examples": [
+        "Can you confirm the type of bill for claim WC1234567, charge amount $1,250.00?",
+        "What TOB should be used for this charge on claim ABC-00456789?",
+        "The type of bill code 0111 looks incorrect for this billed amount, please advise.",
+        "Need the bill type classification for the attached charge on this claim."
+      ],
+      "keyword_rules": {
+        "positive": [
+          { "phrase": "type of bill", "weight": 3.0 },
+          { "phrase": "bill type", "weight": 3.0 },
+          { "phrase": "tob", "weight": 2.0, "whole_word": true },
+          { "phrase": "bill classification", "weight": 2.0 },
+          { "phrase": "type of bill code", "weight": 3.0 },
+          { "phrase": "charge amount", "weight": 1.0 },
+          { "phrase": "billed charge", "weight": 1.0 }
+        ],
+        "negative": [
+          { "phrase": "explanation of review", "weight": 1.5 },
+          { "phrase": "check number", "weight": 1.0 }
+        ],
+        "decisive": [
+          { "all_of": ["type of bill"] },
+          { "all_of": ["bill type"] }
+        ]
+      },
+      "structural_gate": {
+        "require_any_pattern": ["claim_number_generic"],
+        "penalty_if_absent": 0.30
+      },
+      "fields": [
+        {
+          "name": "claim_number",
+          "display_name": "Claim Number",
+          "required": true,
+          "pattern_ref": "claim_number_generic",
+          "label_aliases": ["claim number", "claim no", "claim #", "claim id", "claim"],
+          "normalizer": "upper_alnum"
+        },
+        {
+          "name": "charge_amount",
+          "display_name": "Charge Amount",
+          "required": true,
+          "pattern_ref": "currency_amount",
+          "label_aliases": ["charge amount", "billed charge", "billed amount", "total charge", "charge", "amount"],
+          "normalizer": "money"
+        },
+        {
+          "name": "bill_type_code",
+          "display_name": "Bill Type Code",
+          "required": false,
+          "pattern_ref": "bill_type_code",
+          "label_aliases": ["type of bill", "bill type", "tob", "type of bill code"],
+          "normalizer": "digits"
+        }
+      ]
+    },
+
+    {
+      "id": "eor_request",
+      "display_name": "EOR Copy Request",
+      "enabled": true,
+      "draft": true,
+      "priority": 20,
+      "description_internal": "PLACEHOLDER. Sender requests a copy of an Explanation of Review for a claim or date of service.",
+      "prototypes": [
+        "The sender is requesting a copy of the explanation of review for a claim.",
+        "A provider asks to be sent the EOR document covering a specific date of service.",
+        "Request to resend or forward the explanation of review paperwork for a claim."
+      ],
+      "examples": [
+        "Please send a copy of the EOR for claim WC1234567.",
+        "Can I get the explanation of review for date of service 03/14/2026?"
+      ],
+      "keyword_rules": {
+        "positive": [
+          { "phrase": "explanation of review", "weight": 3.0 },
+          { "phrase": "eor", "weight": 2.5, "whole_word": true },
+          { "phrase": "copy of", "weight": 0.8 },
+          { "phrase": "date of service", "weight": 1.0 }
+        ],
+        "negative": [
+          { "phrase": "type of bill", "weight": 2.0 }
+        ],
+        "decisive": [
+          { "all_of": ["explanation of review"] }
+        ]
+      },
+      "structural_gate": {
+        "require_any_pattern": ["claim_number_generic"],
+        "penalty_if_absent": 0.25
+      },
+      "fields": [
+        {
+          "name": "claim_number",
+          "display_name": "Claim Number",
+          "required": true,
+          "pattern_ref": "claim_number_generic",
+          "label_aliases": ["claim number", "claim no", "claim #", "claim"],
+          "normalizer": "upper_alnum"
+        },
+        {
+          "name": "date_of_service",
+          "display_name": "Date of Service",
+          "required": true,
+          "pattern_ref": "us_date",
+          "label_aliases": ["date of service", "dos", "service date", "date"],
+          "normalizer": "date_iso"
+        }
+      ]
+    },
+
+    {
+      "id": "bill_reconsideration",
+      "display_name": "Bill Reconsideration",
+      "enabled": true,
+      "draft": true,
+      "priority": 30,
+      "description_internal": "PLACEHOLDER. Sender disputes a reduction or denial and asks for the bill to be reconsidered or reprocessed.",
+      "prototypes": [
+        "The sender disputes how a bill was reduced or denied and asks for reconsideration.",
+        "A provider is appealing the payment amount on a claim and wants the bill reprocessed.",
+        "Request to review a denied or underpaid charge again and adjust the payment."
+      ],
+      "examples": [
+        "Requesting reconsideration of the reduced charge on claim WC1234567 for $1,250.00.",
+        "This bill was denied in error, please reprocess claim ABC-00456789."
+      ],
+      "keyword_rules": {
+        "positive": [
+          { "phrase": "reconsideration", "weight": 3.0 },
+          { "phrase": "reconsider", "weight": 2.5 },
+          { "phrase": "appeal", "weight": 2.0 },
+          { "phrase": "reprocess", "weight": 2.0 },
+          { "phrase": "denied in error", "weight": 2.5 },
+          { "phrase": "underpaid", "weight": 2.0 }
+        ],
+        "negative": [],
+        "decisive": [
+          { "all_of": ["reconsideration"] }
+        ]
+      },
+      "structural_gate": {
+        "require_any_pattern": ["claim_number_generic"],
+        "penalty_if_absent": 0.25
+      },
+      "fields": [
+        {
+          "name": "claim_number",
+          "display_name": "Claim Number",
+          "required": true,
+          "pattern_ref": "claim_number_generic",
+          "label_aliases": ["claim number", "claim no", "claim #", "claim"],
+          "normalizer": "upper_alnum"
+        },
+        {
+          "name": "charge_amount",
+          "display_name": "Charge Amount",
+          "required": true,
+          "pattern_ref": "currency_amount",
+          "label_aliases": ["charge amount", "billed amount", "amount", "charge"],
+          "normalizer": "money"
+        },
+        {
+          "name": "date_of_service",
+          "display_name": "Date of Service",
+          "required": false,
+          "pattern_ref": "us_date",
+          "label_aliases": ["date of service", "dos", "service date"],
+          "normalizer": "date_iso"
+        }
+      ]
+    },
+
+    {
+      "id": "payment_status",
+      "display_name": "Payment Status Inquiry",
+      "enabled": true,
+      "draft": true,
+      "priority": 40,
+      "description_internal": "PLACEHOLDER. Sender asks whether a bill has been paid, or when payment will issue.",
+      "prototypes": [
+        "The sender is asking whether payment has been issued for a bill on a claim.",
+        "A provider wants to know the status of a check or EFT for an outstanding invoice.",
+        "Follow up asking when payment will be released for a submitted charge."
+      ],
+      "examples": [
+        "Has payment issued on claim WC1234567? Invoice INV-889231.",
+        "Checking status of check #558201 for this claim."
+      ],
+      "keyword_rules": {
+        "positive": [
+          { "phrase": "payment status", "weight": 3.0 },
+          { "phrase": "has payment", "weight": 2.0 },
+          { "phrase": "when will", "weight": 1.0 },
+          { "phrase": "check number", "weight": 2.0 },
+          { "phrase": "not been paid", "weight": 2.5 },
+          { "phrase": "outstanding", "weight": 1.5 },
+          { "phrase": "remittance", "weight": 2.0 }
+        ],
+        "negative": [
+          { "phrase": "reconsideration", "weight": 2.0 }
+        ],
+        "decisive": [
+          { "all_of": ["payment status"] }
+        ]
+      },
+      "structural_gate": {
+        "require_any_pattern": ["claim_number_generic", "invoice_number", "check_number"],
+        "penalty_if_absent": 0.25
+      },
+      "fields": [
+        {
+          "name": "claim_number",
+          "display_name": "Claim Number",
+          "required": true,
+          "pattern_ref": "claim_number_generic",
+          "label_aliases": ["claim number", "claim no", "claim #", "claim"],
+          "normalizer": "upper_alnum"
+        },
+        {
+          "name": "invoice_number",
+          "display_name": "Invoice Number",
+          "required": false,
+          "pattern_ref": "invoice_number",
+          "label_aliases": ["invoice", "invoice number", "invoice no", "bill number"],
+          "normalizer": "digits"
+        },
+        {
+          "name": "check_number",
+          "display_name": "Check / EFT Number",
+          "required": false,
+          "pattern_ref": "check_number",
+          "label_aliases": ["check number", "check no", "check #", "eft"],
+          "normalizer": "digits"
+        }
+      ]
+    }
+  ]
+}

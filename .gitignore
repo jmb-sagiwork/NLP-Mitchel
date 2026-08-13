@@ -1,0 +1,31 @@
+# Model weights ship as a release artifact, never in git history.
+src/email_triage/resources/model/*.onnx
+src/email_triage/resources/model/tokenizer.json
+
+# PHI-bearing local data. Never commit.
+data/
+out/
+*.jsonl
+!tests/fixtures/**/*.jsonl
+
+# Offline distribution artifacts
+wheels/
+dist/
+dist_runtime/
+build/
+*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tooling / editor
+.tokensave/
+.claude/
+.vscode/
+.idea/
