@@ -8,13 +8,28 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .errors import ConfigError, PatternError
 
-RESOURCES = Path(__file__).resolve().parent / "resources"
+def _resources_dir() -> Path:
+    """Locate bundled resources whether running from source or frozen.
+
+    PyInstaller unpacks --add-data into sys._MEIPASS; from source they sit
+    beside this module.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "email_triage" / "resources"
+        if bundled.is_dir():
+            return bundled
+    return Path(__file__).resolve().parent / "resources"
+
+
+RESOURCES = _resources_dir()
 CONCERNS_PATH = RESOURCES / "concerns.json"
 PATTERNS_PATH = RESOURCES / "patterns.library.json"
 

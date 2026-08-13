@@ -10,6 +10,7 @@ Nothing here is required by the engine. `classify_email` is the real product.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -25,7 +26,19 @@ from ..render import (
 from ..types import TriageResult, TriageStatus
 from . import theme as th
 
-DATASET_PATH = Path.cwd() / "data" / "dataset.jsonl"
+def _dataset_dir() -> Path:
+    """Where captured training rows land.
+
+    Frozen: beside the .exe, so the file is where the operator expects it and
+    never in a temp dir that gets cleaned. From source: the project's data/.
+    This file holds real email text - see pipeline SP-1.1-44.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
+    return Path.cwd() / "data"
+
+
+DATASET_PATH = _dataset_dir() / "dataset.jsonl"
 
 PLACEHOLDER = (
     "Paste the email body here.\n\n"
@@ -528,7 +541,73 @@ class TriageApp:
         self.note_var.set("")
 
 
+def selftest() -> int:
+    """Headless check that the frozen bundle actually works.
+
+    A windowed exe swallows stdout and shows tracebacks in a modal, so this
+    writes a report next to the executable instead. Also the field-diagnostic
+    for "it won't start on this machine".
+    """
+    import json
+    import platform
+
+    report: dict = {
+        "python": sys.version,
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "executable": sys.executable,
+        "machine": platform.machine(),
+        "resources_dir": None,
+        "ok": False,
+    }
+    try:
+        from ..config import RESOURCES
+        from ..engine import TriageEngine
+
+        report["resources_dir"] = str(RESOURCES)
+        report["resources_exist"] = RESOURCES.is_dir()
+
+        eng = TriageEngine()
+        report["embeddings_active"] = eng.embeddings_active
+        report["layers"] = list(eng.layers_used)
+        report["concern_ids"] = list(eng.concern_ids)
+
+        r = eng.classify(
+            "Can you confirm the type of bill for claim WC1234567? "
+            "Charge amount is $1,250.00.",
+            subject="Type of bill question",
+        )
+        report["result"] = {
+            "concern_id": r.concern_id,
+            "status": r.status.value,
+            "confidence": round(r.confidence, 3),
+            "values": r.values,
+            "elapsed_ms": round(r.elapsed_ms, 1),
+        }
+        report["ok"] = (
+            r.concern_id == "type_of_bill"
+            and r.values.get("claim_number") == "WC1234567"
+            and r.values.get("charge_amount") == "1250.00"
+        )
+    except Exception as exc:
+        import traceback
+
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        report["traceback"] = traceback.format_exc()
+
+    base = (
+        Path(sys.executable).resolve().parent
+        if getattr(sys, "frozen", False)
+        else Path.cwd()
+    )
+    out = base / "selftest.json"
+    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    return 0 if report["ok"] else 1
+
+
 def main() -> None:
+    if "--selftest" in sys.argv:
+        raise SystemExit(selftest())
     root = tk.Tk()
     try:
         root.tk.call("tk", "scaling", 1.25)

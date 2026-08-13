@@ -30,6 +30,38 @@ py -3.14 -m pytest -q               # 39 tests
 Without the model the engine still runs on regex + rules and caps confidence at
 70%. It degrades; it does not crash.
 
+## Building the EXE
+
+```bash
+py -3.14 scripts/build_exe.py --clean
+```
+
+Produces `dist/EmailTriage/` (~128 MB) with a double-clickable
+`EmailTriage.exe`. Everything is bundled — Python, ONNX Runtime, the encoder,
+`concerns.json`. The target machine needs **no Python and no internet**.
+
+The build script runs the frozen binary's self-test from a temp directory before
+declaring success, because a build that merely produces an `.exe` is not
+evidence that the model came along with it.
+
+```bash
+dist/EmailTriage/EmailTriage.exe --selftest     # writes selftest.json, exit 0/1
+```
+
+That flag is also the field diagnostic for "it won't start on this machine" —
+it reports the interpreter, whether resources resolved, whether the embedding
+layer loaded, and a full traceback on failure.
+
+**Scope:** this freezes the *demo harness*. The library a host system imports
+stays a wheel — a frozen exe cannot be imported by another interpreter's
+`main.py`. Two different deliverables; see `pipeline.md` SP-1.1-31.
+
+Notes:
+- Close the app before rebuilding; Windows locks the bundled DLLs. The script
+  detects this and says so.
+- `data/dataset.jsonl` is written **next to the .exe**, not in the working
+  directory. It holds real email text.
+
 ## How it works
 
 Three layers vote, weighted, over one JSON config:
