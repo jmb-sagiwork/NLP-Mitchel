@@ -26,6 +26,21 @@ That is the whole integration surface. Everything else is internal.
 See [`TECH_STACK.md`](TECH_STACK.md) for the full stack walkthrough and the four
 levers for teaching the engine without writing code.
 
+## Download the demo (Windows, no install)
+
+**[EmailTriage-v0.1.0-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.0/EmailTriage-v0.1.0-windows-x64.zip)** — 56 MB zipped, ~122 MB unpacked ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
+
+Unzip anywhere and run `EmailTriage.exe`. No Python, no internet. Keep the folder
+intact — the exe loads Python, ONNX Runtime, the encoder and `concerns.json` from
+the `_internal` folder beside it.
+
+```
+EmailTriage.exe --selftest
+```
+
+Run that first on any new machine: it writes `selftest.json`, exits 0/1, and
+reports whether resources resolved and the embedding layer loaded.
+
 ## Quick start
 
 ```bash
