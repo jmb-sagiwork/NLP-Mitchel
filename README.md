@@ -28,18 +28,27 @@ levers for teaching the engine without writing code.
 
 ## Download the demo (Windows, no install)
 
-**[EmailTriage-v0.1.0-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.0/EmailTriage-v0.1.0-windows-x64.zip)** — 56 MB zipped, ~122 MB unpacked ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
+**[EmailTriage-v0.1.0-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.0/EmailTriage-v0.1.0-windows-x64.exe)** — one self-contained 58 MB file. Download, double-click, done.
 
-Unzip anywhere and run `EmailTriage.exe`. No Python, no internet. Keep the folder
-intact — the exe loads Python, ONNX Runtime, the encoder and `concerns.json` from
-the `_internal` folder beside it.
+The MiniLM encoder is **inside** the exe. No Python, no internet, no folder to
+keep together. Copy it anywhere and it runs.
+
+Fallback: **[EmailTriage-v0.1.0-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.0/EmailTriage-v0.1.0-windows-x64.zip)** — the same app as an unpacked folder
+(56 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
+if the ~4 s cold start matters; keep that folder intact. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
+
+Run this first on any new machine:
 
 ```
 EmailTriage.exe --selftest
 ```
 
-Run that first on any new machine: it writes `selftest.json`, exits 0/1, and
-reports whether resources resolved and the embedding layer loaded.
+It writes `selftest.json`, exits 0/1, and reports the interpreter, whether
+resources resolved, and whether the embedding layer loaded. `"embeddings_active":
+true` is the line that proves the model came along.
+
+Both builds write `data/dataset.jsonl` next to the .exe. **That file holds real
+email text and must stay on the client machine.**
 
 ## Quick start
 
@@ -55,12 +64,22 @@ Without the model the engine still runs on regex + rules and caps confidence at
 ## Building the EXE
 
 ```bash
-py -3.14 scripts/build_exe.py --clean
+py -3.14 scripts/build_exe.py --clean              # one-dir: dist/EmailTriage/
+py -3.14 scripts/build_exe.py --onefile --clean    # one-file: dist/EmailTriage.exe
 ```
 
-Produces `dist/EmailTriage/` (~128 MB) with a double-clickable
-`EmailTriage.exe`. Everything is bundled — Python, ONNX Runtime, the encoder,
-`concerns.json`. The target machine needs **no Python and no internet**.
+One-dir produces `dist/EmailTriage/` (~122 MB) with a double-clickable
+`EmailTriage.exe` beside its `_internal` folder. One-file folds that whole folder
+into a single 58 MB exe. Either way everything is bundled — Python, ONNX Runtime,
+the encoder, `concerns.json` — and the target machine needs **no Python and no
+internet**.
+
+Pick one-file for handing someone a single artifact; pick one-dir when startup
+latency matters or the endpoint blocks self-extracting exes. The bootloader
+unpacks one-file to a temp dir on **every** launch, so cold start is ~4 s against
+roughly instant for one-dir. Both resolve resources through `sys._MEIPASS` and
+both write `data/dataset.jsonl` next to the real exe, so on-disk behaviour is
+identical.
 
 The build script runs the frozen binary's self-test from a temp directory before
 declaring success, because a build that merely produces an `.exe` is not

@@ -2,6 +2,7 @@
 
     py -3.14 scripts/build_exe.py
     py -3.14 scripts/build_exe.py --clean
+    py -3.14 scripts/build_exe.py --onefile --clean
 
 A build that produces an .exe is not evidence. This runs the frozen binary's
 --selftest from a foreign working directory (which is how a real operator will
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,9 +22,8 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 SPEC = PROJECT / "EmailTriage.spec"
-DIST = PROJECT / "dist" / "EmailTriage"
-EXE = DIST / "EmailTriage.exe"
 MODEL = PROJECT / "src" / "email_triage" / "resources" / "model" / "model_quint8_avx2.onnx"
+EXE_NAME = "EmailTriage.exe"
 
 
 def _exe_is_running() -> bool:
@@ -30,12 +31,12 @@ def _exe_is_running() -> bool:
         return False
     try:
         out = subprocess.run(
-            ["tasklist", "/FI", f"IMAGENAME eq {EXE.name}", "/NH"],
+            ["tasklist", "/FI", f"IMAGENAME eq {EXE_NAME}", "/NH"],
             capture_output=True, text=True, timeout=30,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return False
-    return EXE.name.lower() in out.lower()
+    return EXE_NAME.lower() in out.lower()
 
 
 def human(n: int) -> str:
@@ -49,7 +50,15 @@ def tree_size(p: Path) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
+    ap.add_argument("--onefile", action="store_true",
+                    help="single self-contained exe (encoder inside it); slower cold start")
     args = ap.parse_args()
+
+    # One-file puts the exe straight in dist/ with no folder around it, so
+    # selftest.json lands beside it there rather than inside dist/EmailTriage/.
+    dist_root = PROJECT / "dist"
+    bundle = dist_root if args.onefile else dist_root / "EmailTriage"
+    exe = bundle / EXE_NAME
 
     if not MODEL.exists():
         print("Model not found. Run: py -3.14 scripts/fetch_model.py")
@@ -58,42 +67,45 @@ def main() -> int:
 
     # A running instance holds its DLLs open and PyInstaller fails mid-build
     # with a bare WinError 5 that names a random .pyd. Say what is actually wrong.
-    if EXE.exists() and _exe_is_running():
-        print(f"{EXE.name} is currently running - close the window and re-run.")
+    if exe.exists() and _exe_is_running():
+        print(f"{EXE_NAME} is currently running - close the window and re-run.")
         print("(Windows locks the bundled DLLs, so the build cannot replace them.)")
         return 1
 
     if args.clean:
-        for d in (PROJECT / "build", PROJECT / "dist"):
+        for d in (PROJECT / "build", dist_root):
             shutil.rmtree(d, ignore_errors=True)
             print(f"  removed {d.name}/")
 
-    print("Building...")
+    print(f"Building ({'one-file' if args.onefile else 'one-dir'})...")
+    env = {**os.environ, "EMAILTRIAGE_ONEFILE": "1" if args.onefile else "0"}
     proc = subprocess.run(
         [sys.executable, "-m", "PyInstaller", str(SPEC), "--noconfirm",
-         "--distpath", str(PROJECT / "dist"), "--workpath", str(PROJECT / "build")],
-        cwd=PROJECT, capture_output=True, text=True,
+         "--distpath", str(dist_root), "--workpath", str(PROJECT / "build")],
+        cwd=PROJECT, capture_output=True, text=True, env=env,
     )
     if proc.returncode != 0:
         print(proc.stdout[-3000:])
         print(proc.stderr[-3000:])
         return proc.returncode
 
-    if not EXE.exists():
-        print(f"Build reported success but {EXE.name} is missing.")
+    if not exe.exists():
+        print(f"Build reported success but {EXE_NAME} is missing.")
         return 1
 
-    print(f"  {EXE.name}  {human(EXE.stat().st_size)}")
-    print(f"  bundle    {human(tree_size(DIST))}")
+    print(f"  {EXE_NAME}  {human(exe.stat().st_size)}")
+    if not args.onefile:
+        print(f"  bundle    {human(tree_size(bundle))}")
 
     # Run from somewhere else entirely: a frozen app must not depend on cwd.
+    # One-file also unpacks ~122 MB to temp on first launch, so allow longer.
     print("\nSelf-test (from a temp working directory)...")
-    (DIST / "selftest.json").unlink(missing_ok=True)
+    (bundle / "selftest.json").unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
-        run = subprocess.run([str(EXE), "--selftest"], cwd=tmp,
-                             capture_output=True, text=True, timeout=180)
+        run = subprocess.run([str(exe), "--selftest"], cwd=tmp,
+                             capture_output=True, text=True, timeout=300)
 
-    report_path = DIST / "selftest.json"
+    report_path = bundle / "selftest.json"
     if not report_path.exists():
         print("  FAILED: no selftest.json written")
         print(run.stdout[-2000:] or "(no stdout)")
@@ -113,7 +125,7 @@ def main() -> int:
     res = report["result"]
     print(f"  sample           : {res['concern_id']} @ {res['confidence']} "
           f"-> {res['values']}")
-    print(f"\nReady: {EXE}")
+    print(f"\nReady: {exe}")
     return 0
 
 

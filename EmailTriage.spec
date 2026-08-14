@@ -5,12 +5,20 @@
 # interpreter's main.py. See pipeline SP-1.1-31.
 #
 # Build:  py -3.14 -m PyInstaller EmailTriage.spec --noconfirm
+#
+# One-file mode: set EMAILTRIAGE_ONEFILE=1 (scripts/build_exe.py --onefile does
+# this). A spec cannot take custom CLI flags, so the switch travels by env var.
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_dynamic_libs
 
 PROJECT = Path(SPECPATH)
+
+# One self-contained EmailTriage.exe with the encoder inside it, vs a folder
+# beside the exe. See the trade-off note at the bottom of this file.
+ONEFILE = os.environ.get("EMAILTRIAGE_ONEFILE") == "1"
 SRC = PROJECT / "src"
 RESOURCES = SRC / "email_triage" / "resources"
 
@@ -72,8 +80,10 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    [],
-    exclude_binaries=True,
+    # One-file folds every binary and data file into the exe itself; one-dir
+    # leaves them to COLLECT below.
+    *([a.binaries, a.datas] if ONEFILE else [[]]),
+    exclude_binaries=not ONEFILE,
     name="EmailTriage",
     debug=False,
     bootloader_ignore_signals=False,
@@ -87,11 +97,21 @@ exe = EXE(
     entitlements_file=None,
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="EmailTriage",
-)
+if not ONEFILE:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="EmailTriage",
+    )
+
+# One-file trade-off, for whoever reads this next:
+#   - The bootloader unpacks ~122 MB (onnxruntime DLLs, Tk, the 22 MB encoder)
+#     to a temp dir on every launch, so cold start is seconds, not instant.
+#   - config.py already resolves resources through sys._MEIPASS, and app.py
+#     writes data/dataset.jsonl next to sys.executable - which stays the real
+#     exe path, not the temp dir. So both modes behave identically on disk.
+#   - Locked-down endpoints sometimes block self-extracting exes outright. If
+#     the client's machine refuses to launch it, fall back to the one-dir zip.
