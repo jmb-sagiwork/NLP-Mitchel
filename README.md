@@ -66,7 +66,7 @@ The MiniLM encoder is **inside** the exe. No Python, no internet, no folder to
 keep together. Copy it anywhere and it runs.
 
 Fallback: **[EmailTriage-v0.1.1-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.1/EmailTriage-v0.1.1-windows-x64.zip)** — the same app as an unpacked folder
-(56 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
+(58 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
 if the ~4 s cold start matters; keep that folder intact. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
 
 Run this first on any new machine:
