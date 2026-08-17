@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .types import TriageResult, TriageStatus
 
-DATASET_SCHEMA_VERSION = "1.0.0"
+# 1.1.0 added label.proposed_concern / label.proposed_reason: a reviewer can
+# now name a concern the taxonomy does not contain yet (SP-1.1-56).
+DATASET_SCHEMA_VERSION = "1.1.0"
 
 _STATUS_GLYPH = {
     TriageStatus.CLASSIFIED: "[OK]",
@@ -117,6 +120,16 @@ def text_fingerprint(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def slugify_label(text: str) -> str:
+    """Human name -> the id a `concerns.json` entry would use.
+
+    "Refund Request (urgent)" -> "refund_request_urgent". Reviewers type names,
+    not identifiers, so this is what turns "Refund Request" typed in the Teach
+    bar into something that can be pasted straight into the config later.
+    """
+    return re.sub(r"[^a-z0-9]+", "_", text.strip().lower()).strip("_")
+
+
 def build_training_record(
     body: str,
     subject: str,
@@ -125,6 +138,8 @@ def build_training_record(
     corrected_concern_id: str | None = None,
     corrected_reason_id: str | None = None,
     corrected_fields: dict[str, str] | None = None,
+    proposed_concern: str = "",
+    proposed_reason: str = "",
     reviewer_note: str = "",
     reviewer: str = "",
 ) -> dict[str, Any]:
@@ -133,17 +148,34 @@ def build_training_record(
     `label` is what the human says is true. When no correction is supplied it
     mirrors the prediction and `verified` stays false, so a later training run
     can filter on human-confirmed rows only.
+
+    `proposed_concern` / `proposed_reason` are free text: the reviewer naming
+    something the taxonomy does not contain yet. They become the label so the
+    rows group correctly, and are echoed under `label.proposed_*` so a later
+    pass can tell "you got bill_status wrong" apart from "this is a category
+    we have never modelled". A proposal is not a prediction the engine can
+    make - it only becomes one once someone writes prototypes for it in
+    concerns.json.
     """
     predicted = result.concern_id
-    corrected = corrected_concern_id or predicted
     predicted_reason = result.reason_id
-    corrected_reason = corrected_reason_id or predicted_reason
+
+    proposed_concern_id = slugify_label(proposed_concern) if proposed_concern else ""
+    proposed_reason_id = slugify_label(proposed_reason) if proposed_reason else ""
+
+    corrected = corrected_concern_id or proposed_concern_id or predicted
+    corrected_reason = corrected_reason_id or proposed_reason_id or predicted_reason
     field_labels = {
         name: (corrected_fields or {}).get(name, f.value)
         for name, f in result.fields.items()
     }
     verified = bool(
-        corrected_concern_id or corrected_reason_id or corrected_fields or reviewer_note
+        corrected_concern_id
+        or corrected_reason_id
+        or proposed_concern_id
+        or proposed_reason_id
+        or corrected_fields
+        or reviewer_note
     )
 
     return {
@@ -162,6 +194,20 @@ def build_training_record(
             "reason_id": corrected_reason,
             "fields": field_labels,
             "verified_by_human": verified,
+            # Set when the reviewer named something outside the taxonomy. Both
+            # are None on an ordinary correction, so `is_new_taxonomy` is the
+            # one flag a triage of the dataset needs to sort on.
+            "proposed_concern": (
+                {"id": proposed_concern_id, "display_name": proposed_concern.strip()}
+                if proposed_concern_id
+                else None
+            ),
+            "proposed_reason": (
+                {"id": proposed_reason_id, "display_name": proposed_reason.strip()}
+                if proposed_reason_id
+                else None
+            ),
+            "is_new_taxonomy": bool(proposed_concern_id or proposed_reason_id),
             "reviewer": reviewer,
             "reviewer_note": reviewer_note,
             "was_prediction_correct": (

@@ -14,34 +14,26 @@ import queue
 import sys
 import threading
 import tkinter as tk
-from pathlib import Path
 from tkinter import messagebox, ttk
 
 from email_triage.engine import TriageEngine
 from email_triage.render import (
     append_training_record,
     build_training_record,
+    slugify_label,
     to_json,
     to_plain_text,
 )
 from email_triage.types import TriageResult
 
 from . import theme as th
+from .paths import DATASET_PATH
 
-
-def _dataset_dir() -> Path:
-    """Where captured training rows land.
-
-    Frozen: beside the .exe, so the file is where the operator expects it and
-    never in a temp dir that gets cleaned. From source: the project's data/.
-    This file holds real email text - see pipeline SP-1.1-44.
-    """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent / "data"
-    return Path.cwd() / "data"
-
-
-DATASET_PATH = _dataset_dir() / "dataset.jsonl"
+# Teach-bar dropdown entries that are not concern ids.
+CORRECT = "(prediction is correct)"
+NO_REASON = "(no reason stated)"
+NEW_CONCERN = "+ new concern..."
+NEW_REASON = "+ new reason..."
 
 PLACEHOLDER = (
     "Paste the email body here.\n\n"
@@ -328,7 +320,12 @@ class TriageApp:
 
     def _build_correction_bar(self) -> None:
         ttk.Frame(self.root, style="Divider.TFrame", height=1).pack(fill="x")
-        bar = ttk.Frame(self.root, style="TFrame", padding=(18, 10, 18, 13))
+        # Tighter than a flat 0.8x of the original padding: the NEW row below
+        # has to fit inside the same 688px window when it unfolds.
+        wrap = ttk.Frame(self.root, style="TFrame", padding=(18, 8, 18, 10))
+        wrap.pack(fill="x")
+
+        bar = ttk.Frame(wrap, style="TFrame")
         bar.pack(fill="x")
 
         ttk.Label(bar, text="TEACH", style="Dim.TLabel").pack(side="left", padx=(0, 11))
@@ -340,6 +337,7 @@ class TriageApp:
             style="Dark.TCombobox", width=22, font=self.fonts.body,
         )
         self.correction_box.pack(side="left", padx=(6, 13))
+        self.correction_box.bind("<<ComboboxSelected>>", self._toggle_new_label_row)
 
         ttk.Label(bar, text="Reason:", style="Dim.TLabel").pack(side="left")
         self.reason_correction_var = tk.StringVar()
@@ -348,8 +346,9 @@ class TriageApp:
             style="Dark.TCombobox", width=24, font=self.fonts.body,
         )
         self.reason_correction_box.pack(side="left", padx=(6, 13))
-        self.reason_correction_box.configure(values=["(prediction is correct)"])
-        self.reason_correction_var.set("(prediction is correct)")
+        self.reason_correction_box.bind("<<ComboboxSelected>>", self._toggle_new_label_row)
+        self.reason_correction_box.configure(values=[CORRECT, NEW_REASON])
+        self.reason_correction_var.set(CORRECT)
 
         ttk.Label(bar, text="Note:", style="Dim.TLabel").pack(side="left")
         self.note_var = tk.StringVar()
@@ -366,6 +365,40 @@ class TriageApp:
 
         self.save_status = ttk.Label(bar, text="", style="Dim.TLabel")
         self.save_status.pack(side="left", padx=(11, 0))
+
+        # ---- second row: naming something the taxonomy does not have -------
+        # Hidden until a "+ new ..." entry is picked, because it is the rare
+        # case and the bar is already wide.
+        self.new_row = ttk.Frame(wrap, style="TFrame")
+
+        ttk.Label(self.new_row, text="NEW", style="Dim.TLabel").pack(
+            side="left", padx=(0, 11)
+        )
+
+        self.new_concern_lbl = ttk.Label(self.new_row, text="Concern:", style="Dim.TLabel")
+        self.new_concern_lbl.pack(side="left")
+        self.new_concern_var = tk.StringVar()
+        self.new_concern_entry = ttk.Entry(
+            self.new_row, textvariable=self.new_concern_var, style="Dark.TEntry",
+            font=self.fonts.body, width=24,
+        )
+        self.new_concern_entry.pack(side="left", padx=(6, 6))
+
+        self.new_reason_lbl = ttk.Label(self.new_row, text="Reason:", style="Dim.TLabel")
+        self.new_reason_lbl.pack(side="left", padx=(11, 0))
+        self.new_reason_var = tk.StringVar()
+        self.new_reason_entry = ttk.Entry(
+            self.new_row, textvariable=self.new_reason_var, style="Dark.TEntry",
+            font=self.fonts.body, width=24,
+        )
+        self.new_reason_entry.pack(side="left", padx=(6, 13))
+
+        # Shows the ids these names become, so what to paste into
+        # concerns.json is never a guess.
+        self.new_id_preview = ttk.Label(self.new_row, text="", style="Dim.TLabel")
+        self.new_id_preview.pack(side="left")
+        self.new_concern_var.trace_add("write", self._refresh_id_preview)
+        self.new_reason_var.trace_add("write", self._refresh_id_preview)
 
     # ------------------------------------------------------------- behaviour
 
@@ -409,9 +442,9 @@ class TriageApp:
             text=f"{detail}  |  {n} concern types  |  config {engine.config.config_version}"
         )
         self.correction_box.configure(
-            values=["(prediction is correct)", *engine.concern_ids, "__other__"]
+            values=[CORRECT, *engine.concern_ids, "__other__", NEW_CONCERN]
         )
-        self.correction_var.set("(prediction is correct)")
+        self.correction_var.set(CORRECT)
 
     def _show_placeholder(self) -> None:
         self.body_text.delete("1.0", "end")
@@ -435,6 +468,7 @@ class TriageApp:
         self.save_btn.configure(state="disabled")
         self.save_status.configure(text="")
         self.note_var.set("")
+        self._reset_correction_inputs()
         self._reset_output()
 
     def _load_sample(self) -> None:
@@ -544,17 +578,67 @@ class TriageApp:
 
         self._fill(self.plain_out, to_plain_text(result))
         self._fill(self.json_out, to_json(result))
-        self.correction_var.set("(prediction is correct)")
-        self.reason_correction_var.set("(prediction is correct)")
+        self._reset_correction_inputs()
 
     def _refresh_reason_options(self, concern_id: str | None) -> None:
         """Offer only the reasons belonging to the predicted concern."""
-        options = ["(prediction is correct)", "(no reason stated)"]
+        options = [CORRECT, NO_REASON]
         if self.engine and concern_id:
             concern = self.engine.config.concern(concern_id)
             if concern:
                 options += [r.id for r in concern.reasons]
-        self.reason_correction_box.configure(values=options)
+        self.reason_correction_box.configure(values=[*options, NEW_REASON])
+
+    # -------------------------------------------------- new-taxonomy capture
+
+    def _toggle_new_label_row(self, _event=None) -> None:
+        """Show the NEW row only while a '+ new ...' entry is selected."""
+        want_concern = self.correction_var.get() == NEW_CONCERN
+        want_reason = self.reason_correction_var.get() == NEW_REASON
+
+        if want_concern or want_reason:
+            if not self.new_row.winfo_ismapped():
+                self.new_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.new_row.pack_forget()
+
+        for widget, wanted in (
+            (self.new_concern_entry, want_concern),
+            (self.new_reason_entry, want_reason),
+        ):
+            widget.configure(state="normal" if wanted else "disabled")
+        for label, wanted in (
+            (self.new_concern_lbl, want_concern),
+            (self.new_reason_lbl, want_reason),
+        ):
+            label.configure(style="Dim.TLabel" if wanted else "Faint.TLabel")
+
+        if want_concern:
+            self.new_concern_entry.focus_set()
+        elif want_reason:
+            self.new_reason_entry.focus_set()
+        self._refresh_id_preview()
+
+    def _refresh_id_preview(self, *_args) -> None:
+        parts = []
+        if self.correction_var.get() == NEW_CONCERN:
+            slug = slugify_label(self.new_concern_var.get())
+            parts.append(f"concern id: {slug or '-'}")
+        if self.reason_correction_var.get() == NEW_REASON:
+            slug = slugify_label(self.new_reason_var.get())
+            parts.append(f"reason id: {slug or '-'}")
+        self.new_id_preview.configure(
+            text=("   ".join(parts) + "   (add to concerns.json to make it predictable)")
+            if parts
+            else ""
+        )
+
+    def _reset_correction_inputs(self) -> None:
+        self.correction_var.set(CORRECT)
+        self.reason_correction_var.set(CORRECT)
+        self.new_concern_var.set("")
+        self.new_reason_var.set("")
+        self._toggle_new_label_row()
 
     def _fill(self, widget: tk.Text, content: str) -> None:
         widget.configure(state="normal")
@@ -574,16 +658,39 @@ class TriageApp:
     def _save_record(self) -> None:
         if self.result is None:
             return
+
         choice = self.correction_var.get()
-        corrected = None if choice.startswith("(") else choice
+        corrected = None
+        proposed_concern = ""
+        if choice == NEW_CONCERN:
+            proposed_concern = self.new_concern_var.get().strip()
+            if not proposed_concern:
+                self.save_status.configure(text="name the new concern first")
+                self.new_concern_entry.focus_set()
+                return
+        elif not choice.startswith("("):
+            corrected = choice
+
         rchoice = self.reason_correction_var.get()
-        corrected_reason = None if rchoice.startswith("(") else rchoice
+        corrected_reason = None
+        proposed_reason = ""
+        if rchoice == NEW_REASON:
+            proposed_reason = self.new_reason_var.get().strip()
+            if not proposed_reason:
+                self.save_status.configure(text="name the new reason first")
+                self.new_reason_entry.focus_set()
+                return
+        elif not rchoice.startswith("("):
+            corrected_reason = rchoice
+
         record = build_training_record(
             body=self._current_body(),
             subject=self.subject_var.get(),
             result=self.result,
             corrected_concern_id=corrected,
             corrected_reason_id=corrected_reason,
+            proposed_concern=proposed_concern,
+            proposed_reason=proposed_reason,
             reviewer_note=self.note_var.get().strip(),
         )
         try:
@@ -591,12 +698,19 @@ class TriageApp:
         except OSError as exc:
             messagebox.showerror("Could not save", f"{type(exc).__name__}: {exc}")
             return
-        verified = record["label"]["verified_by_human"]
-        self.save_status.configure(
-            text=f"saved {'verified' if verified else 'unverified'} row -> "
-                 f"{path.parent.name}/{path.name}"
-        )
+
+        label = record["label"]
+        if label["is_new_taxonomy"]:
+            named = " + ".join(
+                p["id"] for p in (label["proposed_concern"], label["proposed_reason"]) if p
+            )
+            status = f"saved proposal '{named}' -> {path.parent.name}/{path.name}"
+        else:
+            verified = "verified" if label["verified_by_human"] else "unverified"
+            status = f"saved {verified} row -> {path.parent.name}/{path.name}"
+        self.save_status.configure(text=status)
         self.note_var.set("")
+        self._reset_correction_inputs()
 
 
 def main() -> None:
@@ -604,6 +718,10 @@ def main() -> None:
         from .selftest import selftest
 
         raise SystemExit(selftest())
+    if "--proposals" in sys.argv:
+        from .proposals import report
+
+        raise SystemExit(report())
     root = tk.Tk()
     try:
         # Was 1.25. Dropping it to 1.0 is the 20% text shrink that matches the

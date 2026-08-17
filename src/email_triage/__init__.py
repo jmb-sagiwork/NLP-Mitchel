@@ -14,6 +14,7 @@ from .errors import ConfigError, ModelUnavailable, TriageError  # noqa: E402
 from .render import (  # noqa: E402
     append_training_record,
     build_training_record,
+    slugify_label,
     to_json,
     to_plain_text,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "to_json",
     "build_training_record",
     "append_training_record",
+    "slugify_label",
     "TriageError",
     "ConfigError",
     "ModelUnavailable",

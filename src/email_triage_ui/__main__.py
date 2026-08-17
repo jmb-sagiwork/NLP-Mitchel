@@ -1,4 +1,4 @@
-"""CLI: python -m email_triage_ui [--selftest]"""
+"""CLI: python -m email_triage_ui [--selftest | --proposals]"""
 
 from __future__ import annotations
 
@@ -10,6 +10,10 @@ def main() -> int:
         from .selftest import selftest
 
         return selftest()
+    if "--proposals" in sys.argv:
+        from .proposals import report
+
+        return report()
     from .app import main as ui_main
 
     ui_main()

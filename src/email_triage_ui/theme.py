@@ -100,6 +100,8 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure("H1.TLabel", background=BG, foreground=TEXT, font=fonts.h1)
     style.configure("H2.TLabel", background=SURFACE, foreground=TEXT, font=fonts.h2)
     style.configure("Dim.TLabel", background=BG, foreground=TEXT_DIM, font=fonts.small)
+    # Same label, greyed out: used for the half of the NEW row that is inactive.
+    style.configure("Faint.TLabel", background=BG, foreground=TEXT_FAINT, font=fonts.small)
     style.configure("DimSurface.TLabel", background=SURFACE, foreground=TEXT_DIM,
                     font=fonts.small)
     style.configure("DimCard.TLabel", background=ELEVATED, foreground=TEXT_DIM,

@@ -185,7 +185,37 @@ confidently is the worst failure mode available; this makes thinness visible.
 lowers confidence, and lists the gap in `missing_fields`. Silently relabelling
 because a regex missed would be worse than reporting the gap.
 
+## Teaching it something new
+
+Two different actions, often confused:
+
+| You want to... | Do this | Effect |
+|---|---|---|
+| Fix a wrong label on one email | Teach bar → pick the right concern/reason → **Save to dataset** | One labelled row. Does not change behaviour by itself. |
+| Name a category the taxonomy lacks | Teach bar → **`+ new concern...`** → type the name | Row is flagged `is_new_taxonomy`. Still cannot be predicted. |
+| Make the engine actually predict it | Add it to `concerns.json` with prototypes | The engine can now classify it. |
+
+The dropdown can only offer what `concerns.json` contains — that is why
+`__other__` used to be the only escape hatch. Picking **`+ new concern...`** (or
+**`+ new reason...`**) unfolds a second row where you type the name; the window
+shows you the id it becomes (`Refund Request` → `refund_request`) so there is no
+guessing when you write the config entry.
+
+To see what people have been proposing:
+
+```bash
+py -3.14 -m email_triage_ui --proposals
+```
+
+It prints each proposed concern and reason with a count, the dates, what the
+engine guessed instead, and reviewer notes — **no email text**, so the report
+can leave the machine.
+
 ## Adding a concern type
+
+This is the step that changes behaviour. Nothing in the UI can substitute for
+it: a concern becomes predictable when it has **prototypes**, because Layer 3
+classifies by cosine similarity against those descriptions.
 
 Edit `src/email_triage/resources/concerns.json`, copy any block, then:
 
@@ -214,14 +244,20 @@ rows are the labelled dataset that tunes or trains the next version.
 {
   "record_id": "…", "created_at": "…",
   "input":      { "subject": "…", "body": "…" },
-  "label":      { "concern_id": "…", "fields": {…},
-                  "verified_by_human": true, "was_prediction_correct": false },
+  "label":      { "concern_id": "…", "reason_id": "…", "fields": {…},
+                  "verified_by_human": true, "was_prediction_correct": false,
+                  "is_new_taxonomy": true,
+                  "proposed_concern": { "id": "refund_request",
+                                        "display_name": "Refund Request" },
+                  "proposed_reason":  null },
   "prediction": { …full result, including per-layer scores and spans… }
 }
 ```
 
 Filter on `verified_by_human` to get the human-confirmed subset;
-`was_prediction_correct: false` gives you the error set to analyse first.
+`was_prediction_correct: false` gives you the error set to analyse first; and
+`is_new_taxonomy: true` separates "the model got this wrong" from "we have
+never modelled this at all", which are different problems with different fixes.
 
 ## Privacy
 
@@ -251,6 +287,7 @@ src/email_triage/          THE ENGINE - this is what a host app imports
 src/email_triage_ui/       THE TEACHING WINDOW - optional, never shipped to a host
   app.py           the window, the Teach bar
   theme.py         dark ttk theme
+  proposals.py     what reviewers asked for that the taxonomy lacks (--proposals)
   selftest.py      headless bundle diagnostic (--selftest)
 
 scripts/fetch_model.py
