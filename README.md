@@ -60,12 +60,12 @@ to a lazily-built default, which is fine for a script and wasteful in a server.
 
 ## Download the demo (Windows, no install)
 
-**[EmailTriage-v0.1.0-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.0/EmailTriage-v0.1.0-windows-x64.exe)** — one self-contained 58 MB file. Download, double-click, done.
+**[EmailTriage-v0.1.1-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.1/EmailTriage-v0.1.1-windows-x64.exe)** — one self-contained 58 MB file. Download, double-click, done.
 
 The MiniLM encoder is **inside** the exe. No Python, no internet, no folder to
 keep together. Copy it anywhere and it runs.
 
-Fallback: **[EmailTriage-v0.1.0-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.0/EmailTriage-v0.1.0-windows-x64.zip)** — the same app as an unpacked folder
+Fallback: **[EmailTriage-v0.1.1-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.1/EmailTriage-v0.1.1-windows-x64.zip)** — the same app as an unpacked folder
 (56 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
 if the ~4 s cold start matters; keep that folder intact. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
 
@@ -78,6 +78,16 @@ EmailTriage.exe --selftest
 It writes `selftest.json`, exits 0/1, and reports the interpreter, whether
 resources resolved, and whether the embedding layer loaded. `"embeddings_active":
 true` is the line that proves the model came along.
+
+The teaching commands work on the exe too, with no Python installed:
+
+```
+EmailTriage.exe --proposals              # what reviewers asked for
+EmailTriage.exe --scaffold refund_request  # concerns.json block for one
+```
+
+The exe is windowed and so has no console — each of these also drops its output
+in a file beside the executable (`proposals.txt`, `scaffold_<id>.json`).
 
 Both builds write `data/dataset.jsonl` next to the .exe. **That file holds real
 email text and must stay on the client machine.**
@@ -105,7 +115,7 @@ py -3.14 scripts/build_exe.py --clean              # one-dir: dist/EmailTriage/
 py -3.14 scripts/build_exe.py --onefile --clean    # one-file: dist/EmailTriage.exe
 ```
 
-One-dir produces `dist/EmailTriage/` (~122 MB) with a double-clickable
+One-dir produces `dist/EmailTriage/` (~128 MB) with a double-clickable
 `EmailTriage.exe` beside its `_internal` folder. One-file folds that whole folder
 into a single 58 MB exe. Either way everything is bundled — Python, ONNX Runtime,
 the encoder, `concerns.json` — and the target machine needs **no Python and no
@@ -193,7 +203,7 @@ Two different actions, often confused:
 |---|---|---|
 | Fix a wrong label on one email | Teach bar → pick the right concern/reason → **Save to dataset** | One labelled row. Does not change behaviour by itself. |
 | Name a category the taxonomy lacks | Teach bar → **`+ new concern...`** → type the name | Row is flagged `is_new_taxonomy`. Still cannot be predicted. |
-| Make the engine actually predict it | Add it to `concerns.json` with prototypes | The engine can now classify it. |
+| Make the engine actually predict it | `--scaffold`, then write prototypes into `concerns.json` | The engine can now classify it. |
 
 The dropdown can only offer what `concerns.json` contains — that is why
 `__other__` used to be the only escape hatch. Picking **`+ new concern...`** (or
@@ -211,13 +221,38 @@ It prints each proposed concern and reason with a count, the dates, what the
 engine guessed instead, and reviewer notes — **no email text**, so the report
 can leave the machine.
 
+When you accept one, get the config block for it:
+
+```bash
+py -3.14 -m email_triage_ui --scaffold refund_request
+```
+
+JSON goes to stdout (so `--scaffold refund_request > block.json` gives a clean
+file), instructions go to stderr. It **does not** write `concerns.json` — see
+below for why.
+
 ## Adding a concern type
 
 This is the step that changes behaviour. Nothing in the UI can substitute for
 it: a concern becomes predictable when it has **prototypes**, because Layer 3
 classifies by cosine similarity against those descriptions.
 
-Edit `src/email_triage/resources/concerns.json`, copy any block, then:
+`--scaffold` gives you everything except the thinking — id, display name,
+`draft: true`, and empty `prototypes` / `examples` arrays. Those two stay empty
+on purpose:
+
+- **Prototypes cannot be derived from a label.** They are the descriptions the
+  encoder embeds. A block auto-filled with none would classify nothing while
+  looking finished.
+- **Examples must not come from the dataset.** `dataset.jsonl` holds real email
+  text; `concerns.json` is committed to git. Write realistic phrasings with
+  fake identifiers instead.
+
+`draft: true` makes `check-config` warn until you take it out, so an unfinished
+concern is visible rather than silently inert.
+
+Edit `src/email_triage/resources/concerns.json`, paste the block (or copy an
+existing one), then:
 
 ```bash
 PYTHONPATH=src py -3.14 -m email_triage check-config    # from a bare checkout

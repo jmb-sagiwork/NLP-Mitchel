@@ -13,10 +13,11 @@ can be pasted into a ticket; the bodies stay in the local dataset file.
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 
-from .paths import DATASET_PATH
+from .paths import DATASET_PATH, dataset_dir
 
 
 def collect(path: str | Path = DATASET_PATH) -> dict[str, dict]:
@@ -56,6 +57,12 @@ def collect(path: str | Path = DATASET_PATH) -> dict[str, dict]:
                     },
                 )
                 entry["count"] += 1
+                if key == "proposed_reason":
+                    # Which concern it was filed under - a reason block has to
+                    # be nested inside one, and the scaffold has to say which.
+                    parent = label.get("concern_id")
+                    if parent:
+                        entry.setdefault("parent_concerns", Counter())[parent] += 1
                 created = record.get("created_at", "")
                 if created:
                     entry["first_seen"] = min(entry["first_seen"] or created, created)
@@ -106,5 +113,143 @@ def format_report(data: dict) -> str:
 
 def report(path: str | Path = DATASET_PATH) -> int:
     data = collect(path)
-    print(format_report(data))
+    text = format_report(data)
+    print(text)
+    _also_write_when_frozen("proposals.txt", text)
     return 0
+
+
+# --------------------------------------------------------------------------
+# scaffolding an accepted proposal into a concerns.json block
+# --------------------------------------------------------------------------
+
+
+def concern_block(concern_id: str, display_name: str) -> dict:
+    """A ready-to-paste `concerns` entry with everything but the thinking.
+
+    `prototypes` and `examples` are left empty on purpose. Prototypes are the
+    one thing that cannot be derived from a label - they are what Layer 3
+    embeds - and examples must not be filled from the dataset, which holds real
+    email text. `draft: true` makes the unfinished state show up in
+    `check-config` instead of looking done.
+    """
+    return {
+        "id": concern_id,
+        "display_name": display_name,
+        "enabled": True,
+        "draft": True,
+        "priority": 100,
+        "description_internal": "TODO: one line on what this concern means.",
+        "prototypes": [],
+        "examples": [],
+        "keyword_rules": {"positive": [], "negative": [], "decisive": []},
+        "structural_gate": {"require_any_pattern": [], "penalty_if_absent": 0.0},
+        "reasons": [],
+        "fields": [],
+    }
+
+
+def reason_block(reason_id: str, display_name: str) -> dict:
+    """A `reasons` entry, to nest inside a concern."""
+    return {
+        "id": reason_id,
+        "display_name": display_name,
+        "prototypes": [],
+        "examples": [],
+        "keyword_rules": {"positive": [], "negative": [], "decisive": []},
+    }
+
+
+def _guidance(kind: str, entry: dict, parent_hint: str) -> str:
+    lines = [
+        f"Scaffold for proposed {kind}: {entry['display_name']!r}",
+        f"Seen {entry['count']}x  (first {entry['first_seen'][:10]}, "
+        f"last {entry['last_seen'][:10]})",
+        "",
+    ]
+    if entry.get("notes"):
+        lines.append("What reviewers said:")
+        lines += [f"  - {n}" for n in entry["notes"][:5]]
+        lines.append("")
+    if parent_hint:
+        lines += [f"Nest this block in the 'reasons' array of: {parent_hint}", ""]
+
+    lines += [
+        "The block above is deliberately incomplete. To finish it:",
+        "  1. Write 3-5 'prototypes' - plain-English sentences describing what",
+        "     the sender wants. These are embedded and compared semantically;",
+        "     they are descriptions, not keywords, and they are the only reason",
+        "     the engine will ever predict this label.",
+        "  2. Add 'examples' - short realistic phrasings with FAKE identifiers.",
+        "     Do not paste rows out of dataset.jsonl; that file holds real email",
+        "     text and concerns.json is committed to git.",
+        "  3. Add 'keyword_rules.positive' for phrases that are dead giveaways.",
+    ]
+    if kind == "concern":
+        lines += [
+            "  4. List 'fields' the concern needs, by 'pattern_ref' - never write",
+            "     a regex here. Set 'require_label': true on any field whose",
+            "     pattern is shared with another field.",
+        ]
+    lines += [
+        "  5. Drop 'draft': true once it is real, then run:",
+        "       python -m email_triage check-config",
+        "",
+        "Until prototypes exist this label cannot be predicted, and with fewer",
+        "than 4 prototypes+examples evidence shrinkage caps its confidence, so",
+        "it will always route to human review (pipeline SP-1.1-20).",
+        "",
+        "Nothing was written to concerns.json - paste it yourself, so the config",
+        "is never edited by a process that cannot judge whether it is finished.",
+    ]
+    return "\n".join(lines)
+
+
+def scaffold(proposed_id: str, path: str | Path = DATASET_PATH) -> int:
+    """Print a concerns.json block for a proposal. JSON on stdout, notes on
+    stderr, so `--scaffold x > block.json` gives a clean file."""
+    data = collect(path)
+
+    if proposed_id in data["concerns"]:
+        entry = data["concerns"][proposed_id]
+        block = concern_block(proposed_id, entry["display_name"] or proposed_id)
+        kind, parent_hint = "concern", ""
+    elif proposed_id in data["reasons"]:
+        entry = data["reasons"][proposed_id]
+        block = reason_block(proposed_id, entry["display_name"] or proposed_id)
+        kind = "reason"
+        parents = entry.get("parent_concerns")
+        parent_hint = parents.most_common(1)[0][0] if parents else "(unknown concern)"
+    else:
+        known = sorted([*data["concerns"], *data["reasons"]])
+        print(f"No proposal named {proposed_id!r} in {data['path']}", file=sys.stderr)
+        if known:
+            print("Known proposals: " + ", ".join(known), file=sys.stderr)
+        else:
+            print(
+                "No proposals recorded yet. In the Teach bar, pick "
+                "'+ new concern...' and name one.",
+                file=sys.stderr,
+            )
+        return 1
+
+    text = json.dumps(block, indent=2, ensure_ascii=False)
+    print(text)
+    notes = _guidance(kind, entry, parent_hint)
+    print("\n" + notes, file=sys.stderr)
+    _also_write_when_frozen(f"scaffold_{proposed_id}.json", text)
+    return 0
+
+
+def _also_write_when_frozen(name: str, text: str) -> Path | None:
+    """A windowed exe has no console, so stdout goes nowhere. Drop the same
+    content beside the executable, the way --selftest already does."""
+    if not getattr(sys, "frozen", False):
+        return None
+    out = dataset_dir().parent / name
+    try:
+        out.write_text(text, encoding="utf-8")
+    except OSError:
+        return None
+    print(f"(also written to {out})", file=sys.stderr)
+    return out

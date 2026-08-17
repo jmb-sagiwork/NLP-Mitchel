@@ -11,7 +11,6 @@ with `email_triage.classify_email(body, subject)` and never ships this window.
 from __future__ import annotations
 
 import queue
-import sys
 import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -714,14 +713,7 @@ class TriageApp:
 
 
 def main() -> None:
-    if "--selftest" in sys.argv:
-        from .selftest import selftest
-
-        raise SystemExit(selftest())
-    if "--proposals" in sys.argv:
-        from .proposals import report
-
-        raise SystemExit(report())
+    """Open the window. Flag handling lives in __main__, which routes here."""
     root = tk.Tk()
     try:
         # Was 1.25. Dropping it to 1.0 is the 20% text shrink that matches the

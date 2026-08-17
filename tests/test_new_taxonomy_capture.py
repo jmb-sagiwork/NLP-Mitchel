@@ -8,12 +8,15 @@ the answer was. These tests cover the capture path that replaced it.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from email_triage.render import (
     append_training_record,
     build_training_record,
     slugify_label,
 )
-from email_triage_ui.proposals import collect, format_report
+from email_triage_ui.proposals import collect, format_report, scaffold
 
 BODY = "Bill status for Claim ID WC1234567, DOS 03/14/2026."
 
@@ -98,3 +101,82 @@ def test_report_on_a_missing_dataset_is_not_an_error(tmp_path):
     data = collect(tmp_path / "nope.jsonl")
     assert data["rows"] == 0
     assert "(none yet)" in format_report(data)
+
+
+# ---------------------------------------------------------------- scaffolding
+
+
+def _dataset_with_a_proposal(tmp_path, engine, **kw):
+    r = engine.classify(BODY)
+    path = tmp_path / "dataset.jsonl"
+    append_training_record(build_training_record(BODY, "", r, **kw), path)
+    return path
+
+
+def test_scaffold_emits_a_pasteable_concern_block(rules_engine, tmp_path, capsys):
+    path = _dataset_with_a_proposal(
+        tmp_path, rules_engine, proposed_concern="Refund Request"
+    )
+    assert scaffold("refund_request", path) == 0
+
+    out = capsys.readouterr()
+    block = json.loads(out.out)          # stdout is clean JSON, nothing else
+    assert block["id"] == "refund_request"
+    assert block["display_name"] == "Refund Request"
+    # Empty on purpose: prototypes are the one thing that cannot be derived
+    # from a label, and draft=true makes check-config say so.
+    assert block["prototypes"] == []
+    assert block["examples"] == []
+    assert block["draft"] is True
+    assert "prototypes" in out.err       # guidance goes to stderr
+
+
+def test_scaffold_of_a_reason_names_the_concern_to_nest_it_in(rules_engine, tmp_path, capsys):
+    path = _dataset_with_a_proposal(
+        tmp_path, rules_engine, proposed_reason="Awaiting records"
+    )
+    assert scaffold("awaiting_records", path) == 0
+
+    out = capsys.readouterr()
+    block = json.loads(out.out)
+    assert block["id"] == "awaiting_records"
+    assert "reasons" not in block        # a reason block nests, it is not a concern
+    assert "bill_status" in out.err      # the concern it was filed under
+
+
+def test_scaffold_never_leaks_email_text(rules_engine, tmp_path, capsys):
+    path = _dataset_with_a_proposal(
+        tmp_path, rules_engine, proposed_concern="Refund Request",
+        reviewer_note="claimant called twice",
+    )
+    scaffold("refund_request", path)
+    out = capsys.readouterr()
+    assert BODY not in out.out + out.err
+    assert "WC1234567" not in out.out + out.err
+    assert "claimant called twice" in out.err   # reviewer notes are shown
+
+
+def test_scaffold_does_not_touch_concerns_json(rules_engine, tmp_path, capsys):
+    """A block with no prototypes would classify nothing while looking done."""
+    config = Path(__file__).resolve().parents[1] / (
+        "src/email_triage/resources/concerns.json"
+    )
+    before = config.read_bytes()
+    path = _dataset_with_a_proposal(
+        tmp_path, rules_engine, proposed_concern="Refund Request"
+    )
+    scaffold("refund_request", path)
+    capsys.readouterr()
+    assert config.read_bytes() == before
+
+
+def test_scaffold_of_an_unknown_id_fails_and_lists_what_exists(
+    rules_engine, tmp_path, capsys
+):
+    path = _dataset_with_a_proposal(
+        tmp_path, rules_engine, proposed_concern="Refund Request"
+    )
+    assert scaffold("no_such_thing", path) == 1
+    err = capsys.readouterr().err
+    assert "no_such_thing" in err
+    assert "refund_request" in err
