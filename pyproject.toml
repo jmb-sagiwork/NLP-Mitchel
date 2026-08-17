@@ -16,6 +16,13 @@ embeddings = ["onnxruntime>=1.24", "numpy>=1.26", "tokenizers>=0.19"]
 frames = ["pandas>=2.0"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
+[project.scripts]
+email-triage = "email_triage.__main__:main"
+email-triage-ui = "email_triage_ui.__main__:main"
+
+# Two distributions in one repo on purpose: `email_triage` is what a host app
+# imports, `email_triage_ui` is the teaching harness. Nothing in the engine
+# imports the UI, so a host can vendor or install the first one alone.
 [tool.setuptools.packages.find]
 where = ["src"]
 

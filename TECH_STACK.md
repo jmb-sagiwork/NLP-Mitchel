@@ -17,7 +17,7 @@ Companion docs: [`README.md`](README.md) for setup, [`pipeline.md`](pipeline.md)
 | Tokenizer | **tokenizers 0.22** | 7 MB | Rust; loaded via `from_file`, so no HTTP client |
 | Math | **numpy 2.5** | 31 MB | Mean pooling + cosine, ~10 lines |
 | Model | **all-MiniLM-L6-v2**, int8 AVX2 quantized | **22 MB** | 6-layer encoder, 384-dim output |
-| UI | Tkinter + ttk `clam` | 0 | Ships with Python |
+| UI (teaching only) | Tkinter + ttk `clam` | 0 | Ships with Python; separate package, not in the engine |
 
 **Total runtime: ~86 MB of packages + 22 MB of model.**
 
@@ -126,7 +126,19 @@ Code, in `engine.py`:
 | `engine.py` | Fusion, decision ladder, `TriageEngine` |
 | `api.py` | `classify_email()` — the only stable contract |
 | `render.py` | Plain text, JSON, training records |
-| `ui/` | Tk demo (optional; the engine does not depend on it) |
+
+Everything above lives in `src/email_triage/`, the package a host application
+imports. The teaching window is a **separate** top-level package:
+
+| File | Job |
+|---|---|
+| `email_triage_ui/app.py` | The window and the Teach bar |
+| `email_triage_ui/theme.py` | Dark ttk theme |
+| `email_triage_ui/selftest.py` | Headless bundle diagnostic (`--selftest`) |
+
+`email_triage_ui` imports `email_triage`; nothing goes the other way, and no
+engine module imports tkinter. That is enforced by
+`tests/test_engine_is_standalone.py`, not just documented here.
 
 ---
 

@@ -1,4 +1,9 @@
-"""CLI: python -m email_triage {ui,check-config,classify}"""
+"""CLI: python -m email_triage {check-config,classify}
+
+Engine-only on purpose. The teaching window lives in its own package and is
+launched with `python -m email_triage_ui`, so nothing here imports tkinter and
+a host that vendors the engine alone still gets a working CLI.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,6 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="email_triage")
     sub = ap.add_subparsers(dest="cmd")
 
-    sub.add_parser("ui", help="launch the Tk demo window")
     sub.add_parser("check-config", help="validate and lint concerns.json")
 
     c = sub.add_parser("classify", help="classify text from stdin")
@@ -18,12 +22,6 @@ def main() -> int:
     c.add_argument("--json", action="store_true", help="emit JSON instead of plain text")
 
     args = ap.parse_args()
-
-    if args.cmd == "ui" or args.cmd is None:
-        from .ui import main as ui_main
-
-        ui_main()
-        return 0
 
     if args.cmd == "check-config":
         from .config import check_config, load_config
@@ -45,11 +43,12 @@ def main() -> int:
         from .render import to_json, to_plain_text
 
         body = sys.stdin.read()
-        result = classify_email(body, subject=args.subject)
+        result = classify_email(body, args.subject)
         print(to_json(result) if args.json else to_plain_text(result))
         return 0
 
     ap.print_help()
+    print("\nTeaching UI: python -m email_triage_ui")
     return 1
 
 

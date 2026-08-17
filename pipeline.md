@@ -2,9 +2,18 @@
 
 This is the active work-item pipeline for the Email Triage NLP module (email body → concern classification → field extraction).
 
+**Scope, as of 08/17/2026:** this repo builds a **library**, not a mail client. The input is two strings — subject and body — handed in by whatever host application owns the mailbox:
+
+```python
+from email_triage import classify_email
+result = classify_email(body, subject)
+```
+
+Outlook COM, IMAP, `.eml` watching and every other ingestion route are **out of scope for now** (SP-1.1-54); the items covering them are parked under **Dropped / out of scope** at the bottom rather than deleted, since IDs are permanent. The repo is split into two packages so a host can take the engine without the window: `email_triage` (the engine — no tkinter anywhere in it) and `email_triage_ui` (the teaching harness). Work that touches ingestion should be re-opened as a new item, not resurrected in place.
+
 **ID rule:** every item gets a permanent, incrementing ID — `SP-1.1-NN`. When adding a new item, use the next number after the highest ID used anywhere in this file or `completed.md`. IDs are never reused or renumbered, even after an item moves to `completed.md`.
 
-**Status legend:** `[ ]` not started · `[~]` in progress · `[X]` completed
+**Status legend:** `[ ]` not started · `[~]` in progress · `[X]` completed · `[—]` dropped / out of scope
 
 **Working loop:** `plan → code → test → discover → list`. Every item runs through the full loop. The `discover` step is not optional: after testing, actively look for what the work surfaced, and list any findings back into this file as new items before closing the current one.
 
@@ -23,21 +32,19 @@ This is the active work-item pipeline for the Email Triage NLP module (email bod
 **Phase 0 — Unblock**
 
 - [~] **SP-1.1-02 — Pin the project interpreter explicitly.** Two different Python 3.14 installs exist: `C:\Python314\python.exe` (3.14.5, on PATH, no onnxruntime) and `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe` (3.14.4, has it). A bare `python` in Git Bash hits the sparse one. **Done so far:** documented in `README.md`, and every script/command uses `py -3.14`. **Remaining:** no enforcement — add a startup guard that fails with a clear message when `onnxruntime` is importable but the interpreter is not the pinned one.
-- [ ] **SP-1.1-03 — Write `preflight.py` and collect results from one real end-user machine.** Reports `sys.version`, `platform.machine()`, whether `pip` is importable, whether `%WINDIR%\System32\VCRUNTIME140_1.dll` and `MSVCP140.dll` exist, and AV health. **This BLOCKS SP-1.1-31 (wheelhouse):** onnxruntime does not bundle the MSVC runtime and loads it by name. Drop the Outlook-registration check — see SP-1.1-43.
+- [ ] **SP-1.1-03 — Write `preflight.py` and collect results from one real end-user machine.** Reports `sys.version`, `platform.machine()`, whether `pip` is importable, whether `%WINDIR%\System32\VCRUNTIME140_1.dll` and `MSVCP140.dll` exist, and AV health. **This BLOCKS SP-1.1-31 (wheelhouse):** onnxruntime does not bundle the MSVC runtime and loads it by name. No mail-client checks — nothing in scope touches a mailbox (SP-1.1-54).
 - [ ] **SP-1.1-48 — Confirm whether REASON is predictable from email text at all.** The reasons supplied ("completed processing and denied", "Not a bill on file", "No claim on file; Missing Information") read like **dispositions recorded after an agent looks the bill up**, not like something an inbound email states. "Completed processing and denied" is an answer, not a question. If they are dispositions, no NLP can predict them from the body — they depend on a claims-system lookup — and the reason layer must be treated as advisory only, with the real value coming from CONCERN + the seven extracted fields. Evidence for this reading: on an ordinary inbound "what is the status of this bill?", the engine correctly emits **no** reason, because none is stated. *(Raised when the user supplied the real taxonomy under SP-1.1-49.)*
 - [ ] **SP-1.1-50 — Confirm which of the seven fields are REQUIRED per concern.** Currently only `claim_id` is required on `bill_status`, and nothing is required on `claim_information` — a deliberate under-commitment, because marking a field required sends every email lacking it to human review. The user listed the seven fields to extract but not which are mandatory. `check-config` warns that `claim_information` has no required fields and therefore no completeness check.
 - [ ] **SP-1.1-51 — Replace guessed field regexes with real observed shapes.** `claim_id`, `patient_account` and `provider_tin` are starting guesses. `claim_id` accepts both `[A-Z]{1,4}\d{6,14}` and a bare `\d{7,14}` run, which structurally overlaps `patient_account`, `provider_tin` (9 digits) and `npi_number` (10 digits). `require_label: true` currently carries all the weight of telling them apart — correct as a safety net, but it means an unlabelled identifier is silently dropped. Tighten once real emails confirm the formats. *(Supersedes the numeric-collision half of SP-1.1-38.)*
-- [ ] **SP-1.1-43 — Decide how mail actually gets in, now that the client uses web-based email.** Outlook COM (SP-1.1-27..30) is no longer a safe assumption. Evaluate, in order of preference: (a) an export/forward rule dropping `.eml` into a watched folder, (b) IMAP/Graph against the webmail backend, (c) browser automation as a last resort — scraping is brittle, breaks on every UI change, and may violate the mail provider's terms, so it needs explicit sign-off before any work starts. The `classify_email(body, subject=...)` contract is deliberately independent of this, so the NLP is unblocked either way. *(Raised when the user reported the client is on a web-based mail system.)*
+- [ ] **SP-1.1-55 — Ship the engine as an installable wheel and write the host-integration note.** SP-1.1-52 made the split real in the source tree; nothing yet produces the artifact a host actually consumes. Build `email_triage` as a wheel (the UI package stays out of it), confirm it imports on a machine with no tkinter and no repo checkout, and write the half-page a host developer needs: the two-string call, the `TriageResult` shape, engine reuse across calls, and the `embeddings` extra. *(Uncovered while implementing SP-1.1-52 — a split that is never packaged is a convention, not a boundary.)*
 
 ---
 
 ## Normal Priority
 
-**Phase 1 — Core data layer**
+**Phase 1 — Input handling**
 
-- [ ] **SP-1.1-08 — Define `EmailRecord` and the `MailSource` Protocol.** Deferred with SP-1.1-43, but still wanted: a single dataclass that every input adapter produces means the UI, an `.eml` reader, and any future mail source all feed the same engine. The engine currently takes `(body, subject)` strings directly, which is fine for one adapter and will not stay fine for three.
-- [ ] **SP-1.1-09 — Implement `EmlMailSource` using the stdlib `email` package.** No `extract-msg` dependency. Likely the first real adapter given SP-1.1-43 option (a).
-- [ ] **SP-1.1-11 — Implement HTML-to-text normalization.** `textprep.normalize` handles plain text only. Web-based mail will arrive as HTML far more often than Outlook plain-text bodies did. Preserve two-column tables as `key: value` — that structure is where required fields often live.
+- [ ] **SP-1.1-11 — Implement HTML-to-text normalization.** `textprep.normalize` handles plain text only, and `classify_email` documents plain text as the contract — but a host that owns a web mailbox will have an HTML body in hand and will pass it straight in. Decide the boundary: either flatten defensively inside `textprep` or detect markup and raise. Whichever way, preserve two-column tables as `key: value` — that structure is where required fields often live. **This is the only ingestion-adjacent item still in scope**, because it is about what the host hands us, not about fetching mail.
 
 **Phase 2 — Config and embeddings**
 
@@ -56,13 +63,6 @@ This is the active work-item pipeline for the Email Triage NLP module (email bod
 - [ ] **SP-1.1-26 — Add the fixture PII scanner to CI.** Regex sweep over `tests/` and `data/` staged files for SSN, DOB, claim, phone, and email patterns; fail on any hit. **Raised in priority by SP-1.1-41:** `data/dataset.jsonl` now accumulates real pasted email bodies on disk. It is gitignored, but a scanner is the backstop against someone committing it with `-f`.
 - [ ] **SP-1.1-44 — Add a PHI warning to the UI's Teach bar.** Saving a training row writes the full email body to `data/dataset.jsonl` in plaintext. The UI currently gives no indication that this is happening or that the file must stay local. Add a one-line notice next to the save button and a first-run confirmation. *(Uncovered while implementing SP-1.1-41.)*
 
-**Phase 4 — Mail integration (ON HOLD pending SP-1.1-43)**
-
-- [ ] **SP-1.1-27 — Implement `OutlookMailSource` with a two-phase `GetTable()` read.** ON HOLD. Retain the design notes: `Folder.GetTable()` + `GetArray(500)` is 10–50× faster than per-item property reads and never materializes a `MailItem`, which structurally eliminates accidental side effects.
-- [ ] **SP-1.1-28 — Implement three-tier folder resolution.** ON HOLD. Cached `(entry_id, store_id)` → explicit config → discovery across all stores. Ambiguous matches must raise, not guess.
-- [ ] **SP-1.1-29 — Enforce and prove read-only behavior.** ON HOLD. Applies to any adapter that touches a live mailbox, including IMAP — reading must not flip unread state.
-- [ ] **SP-1.1-30 — Handle COM failure modes.** ON HOLD. Late binding only; assert the process is not elevated; retry on `RPC_E_SERVERCALL_RETRYLATER`; never `Items.Restrict()` with a date literal (locale-dependent parsing gives silently wrong results).
-
 ---
 
 ## Low Priority
@@ -72,7 +72,7 @@ This is the active work-item pipeline for the Email Triage NLP module (email bod
 - [ ] **SP-1.1-31 — Build the multi-ABI offline wheelhouse and `install.ps1`.** cp311/312/313/314; `pip install --no-index --require-hashes --user`. ~155 MB ZIP. **Blocked by SP-1.1-03.** PyInstaller is disqualified as the primary deliverable because a frozen exe cannot be imported by a host's `main.py`; it stays as Plan B (stdio-JSON sidecar).
 - [ ] **SP-1.1-32 — Dry-run the offline install on the bare Python 3.11.9.** `%LOCALAPPDATA%\Python\pythoncore-3.11-64\` is present and effectively empty — a free, realistic end-user-machine simulator. Do this before shipping anything.
 - [ ] **SP-1.1-33 — Write `DEPLOYMENT.md`.** Bundle build steps, install runbook, VC++ redist prerequisite, rollback path.
-- [ ] **SP-1.1-34 — Extend the CLI.** `ui`, `check-config`, and `classify` exist. Add `doctor` (interpreter, model hash, config version, adapter reachability) and a batch mode over a folder of `.eml`. *(SP-1.1-46 shipped `--selftest`, which is most of `doctor` already — fold the two together rather than writing a second diagnostic, and add the model SHA256 check from SP-1.1-14 while doing it.)*
+- [ ] **SP-1.1-34 — Extend the CLI.** `check-config` and `classify` exist on `python -m email_triage`; `python -m email_triage_ui [--selftest]` covers the window. Add `doctor` (interpreter, model hash, config version) and a batch mode over a folder of `.txt` bodies or a JSONL of `{subject, body}` rows — not `.eml`, which is ingestion and out of scope (SP-1.1-54). *(SP-1.1-46 shipped `--selftest`, which is most of `doctor` already — fold the two together rather than writing a second diagnostic, and add the model SHA256 check from SP-1.1-14 while doing it.)*
 - [ ] **SP-1.1-47 — Decide one-folder vs one-file for the EXE.** SP-1.1-46 ships one-folder (~128 MB, 2.7 s cold start). A `--onefile` build is a single artifact that is easier to hand to an operator, but it re-extracts the whole bundle to `%TEMP%` on every launch, which costs startup time and writes ~128 MB of DLLs and model weights into a temp directory on a 4 GB machine. Measure both, then choose. If one-file wins, confirm `%TEMP%` is not redirected or policy-cleaned on the target boxes.
 - [ ] **SP-1.1-35 — Add the determinism test.** *(Partly done under SP-1.1-23: `test_determinism` asserts identical output for identical input with embeddings off. Extend it to cover the embedding path, which is where float non-determinism would actually appear.)*
 - [ ] **SP-1.1-37 — Add `results_to_dataframe()` as an optional pandas extra.** Lazy `import pandas` inside the function body; 62 MB must stay out of the runtime dependency set.
@@ -80,11 +80,32 @@ This is the active work-item pipeline for the Email Triage NLP module (email bod
 
 ---
 
-**Next available ID: `SP-1.1-52`**
+**Next available ID: `SP-1.1-56`**
+
+---
+
+**Dropped / out of scope**
+
+Parked on 08/17/2026 by SP-1.1-54. Not deleted — the IDs are permanent and the design notes are worth keeping for whenever ingestion comes back. Re-opening any of these means filing a **new** item that references the old one.
+
+- [—] **SP-1.1-08 — Define `EmailRecord` and the `MailSource` Protocol.** An abstraction over input adapters, of which there are now zero: the host owns the mailbox and hands over `(body, subject)`. Reintroducing this before a second input source exists would be architecture ahead of demand.
+- [—] **SP-1.1-09 — Implement `EmlMailSource` using the stdlib `email` package.** Ingestion.
+- [—] **SP-1.1-27 — Implement `OutlookMailSource` with a two-phase `GetTable()` read.** Retain the design note: `Folder.GetTable()` + `GetArray(500)` is 10–50× faster than per-item property reads and never materializes a `MailItem`, which structurally eliminates accidental side effects.
+- [—] **SP-1.1-28 — Implement three-tier folder resolution.** Cached `(entry_id, store_id)` → explicit config → discovery across all stores. Ambiguous matches must raise, not guess.
+- [—] **SP-1.1-29 — Enforce and prove read-only behavior.** Would apply to any adapter touching a live mailbox, including IMAP — reading must not flip unread state.
+- [—] **SP-1.1-30 — Handle COM failure modes.** Late binding only; assert the process is not elevated; retry on `RPC_E_SERVERCALL_RETRYLATER`; never `Items.Restrict()` with a date literal (locale-dependent parsing gives silently wrong results).
 
 ---
 
 **Completed**
+
+- [X] [Date Completed: 08/17/2026] **SP-1.1-54 — Drop mail ingestion from scope; the host supplies subject and body.** Supersedes SP-1.1-43's "decide how mail gets in" question by answering it with "we don't". This module is a library that a host application calls; the host already has the message. Consequences recorded across the repo: SP-1.1-08/09/27/28/29/30 moved to **Dropped**, SP-1.1-03 no longer probes for a mail client, SP-1.1-34's batch mode reads bodies rather than `.eml`, and SP-1.1-11 survives only because the *host* may hand us HTML. `classify_email(body, subject)` was already independent of ingestion, which is why this descope cost no engine changes. **Evidence:** 62 tests pass unchanged; nothing in `src/` ever imported a mail library. [Date Completed: 08/17/2026]
+
+- [X] [Date Completed: 08/17/2026] **SP-1.1-43 — Decide how mail actually gets in.** Closed by decision, not by implementation: **it doesn't**. The three routes evaluated (a watched `.eml` folder, IMAP/Graph against the webmail backend, browser automation) are all deferred to the host application, which already has the message in hand when it calls us. Browser automation in particular never got past evaluation — brittle, breaks on every UI change, and possibly against the mail provider's terms. See SP-1.1-54 for the scope consequences. [Date Completed: 08/17/2026]
+
+- [X] [Date Completed: 08/17/2026] **SP-1.1-52 — Split the repo into an engine package and a UI package.** `src/email_triage/` is now the engine and nothing else; the window moved to `src/email_triage_ui/` as a separate top-level package that depends on the engine one-way. Changes required: the UI's relative imports (`..engine`) became absolute (`email_triage.engine`), `selftest()` moved out of `app.py` into `email_triage_ui/selftest.py` where it exercises the engine only, `python -m email_triage` lost its `ui` subcommand (so the engine CLI no longer imports tkinter) and gained `python -m email_triage_ui` as the replacement, and the PyInstaller spec, `launcher.py` and `run_ui.py` follow the new paths. `classify_email` now accepts `subject` positionally and `classify_emails` accepts mappings, because a host queue holds dicts. **Evidence:** `tests/test_engine_is_standalone.py` — four tests asserting no engine module imports `email_triage_ui`, no engine module imports tkinter, a subprocess `import email_triage` leaves `tkinter` out of `sys.modules`, and both calling styles produce identical results. 62 tests pass; `python -m email_triage_ui --selftest` still extracts all seven fields and exits 0. [Date Completed: 08/17/2026]
+
+- [X] [Date Completed: 08/17/2026] **SP-1.1-53 — Shrink the teaching window by 20%.** Window is 1088x688 (was 1360x860), minimum 896x576 (was 1120x720). Text shrank with it in one place — the Tk scaling factor in `app.main()` went 1.25 → 1.0 — rather than by editing twelve font sizes; every pixel measurement in `theme.py` and `app.py` (paddings, meter width, treeview row height and column widths, pill geometry, scrollbar arrows) came down to match. The field table's columns were trimmed past a flat 20% because the body's natural width still overflowed the smaller window at exactly 0.8×. **Evidence:** scripted run builds the widget tree, loads the engine, classifies the seven-field sample and reads back concern "Bill Status" at 90% with 7 rows; requested content size is 1069x653 inside the 1088x688 window, so nothing is clipped at the default size. [Date Completed: 08/17/2026]
 
 - [X] [Date Completed: 08/14/2026] **SP-1.1-49 — Replace the placeholder taxonomy with the user's real concerns, reasons, and seven extraction fields.** Concerns are now **Bill Status** and **Claim Information**, with a new second level: **reasons** (`completed processing`, `completed processing and denied`, `not a bill on file`, `no claim on file; missing information`, `claim number request`) carrying their own prototypes and keyword rules, scored by the same engine. Fields are the seven supplied: Claim ID, DOS, Patient Account, Prov TIN, Input-Expected Amount, DOI, DOB. Four engine changes were required and each fixes a defect the real taxonomy exposed:
   - **`require_label`** — DOS, DOI and DOB all resolve to one date regex, and Claim ID / Patient Account / Prov TIN are all digit runs. Such a field now accepts label-anchored candidates only and reports nothing otherwise, because an unattributable match is worse than a gap. `test_every_field_sharing_a_pattern_requires_a_label` enforces this for any future shared pattern.

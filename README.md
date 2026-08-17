@@ -8,7 +8,7 @@ Example: concern **Bill Status** carries a reason (`not a bill on file`, `comple
 ```python
 from email_triage import classify_email
 
-result = classify_email(body, subject=subject)
+result = classify_email(body, subject)      # two strings in, one result out
 
 result.concern_id        # "bill_status"
 result.reason_id         # "not_a_bill_on_file"  (None if the email states none)
@@ -25,6 +25,38 @@ That is the whole integration surface. Everything else is internal.
 
 See [`TECH_STACK.md`](TECH_STACK.md) for the full stack walkthrough and the four
 levers for teaching the engine without writing code.
+
+## Dropping it into another app
+
+The repo is two packages, and the dependency only points one way:
+
+| Package | What it is | Depends on |
+|---|---|---|
+| `email_triage` | the engine — classification, extraction, config | nothing but stdlib (plus the optional `embeddings` extra) |
+| `email_triage_ui` | the teaching window | `email_triage` |
+
+Your app takes the first one and never sees the second. Nothing in the engine
+imports tkinter, so it runs on a headless host; `tests/test_engine_is_standalone.py`
+asserts that rather than trusting it.
+
+```python
+from email_triage import TriageEngine, classify_email
+
+engine = TriageEngine()                       # load the model once, at startup
+for msg in inbox:                             # your inbox, your loop
+    result = classify_email(msg.body, msg.subject, engine=engine)
+    if result.needs_review:
+        route_to_human(result.to_dict())
+```
+
+`classify_email(body, subject)` is the entire input contract — plain text, no
+`EmailRecord`, no adapter to implement. **Fetching mail is your side of the
+line:** this module never touches a mailbox, and mail ingestion is deliberately
+out of scope (see `pipeline.md` SP-1.1-54). Pass HTML through your own
+flattener first; the engine expects text.
+
+Reuse one `TriageEngine` across calls. `classify_email` without one falls back
+to a lazily-built default, which is fine for a script and wasteful in a server.
 
 ## Download the demo (Windows, no install)
 
@@ -54,9 +86,14 @@ email text and must stay on the client machine.**
 
 ```bash
 py -3.14 scripts/fetch_model.py     # one time, needs internet (23 MB)
-py -3.14 run_ui.py                  # demo window
-py -3.14 -m pytest -q               # 57 tests
+py -3.14 run_ui.py                  # teaching window
+py -3.14 -m pytest -q               # 62 tests
 ```
+
+Once the packages are installed (`pip install -e .`), the same two entry points
+are `email-triage` (engine CLI: `check-config`, `classify`) and
+`email-triage-ui` (the window), or `python -m email_triage` /
+`python -m email_triage_ui`.
 
 Without the model the engine still runs on regex + rules and caps confidence at
 70%. It degrades; it does not crash.
@@ -93,9 +130,10 @@ That flag is also the field diagnostic for "it won't start on this machine" —
 it reports the interpreter, whether resources resolved, whether the embedding
 layer loaded, and a full traceback on failure.
 
-**Scope:** this freezes the *demo harness*. The library a host system imports
-stays a wheel — a frozen exe cannot be imported by another interpreter's
-`main.py`. Two different deliverables; see `pipeline.md` SP-1.1-31.
+**Scope:** this freezes `email_triage_ui`, the teaching harness. The library a
+host system imports stays a wheel — a frozen exe cannot be imported by another
+interpreter's `main.py`. Two different deliverables; see `pipeline.md`
+SP-1.1-31 and SP-1.1-55.
 
 Notes:
 - Close the app before rebuilding; Windows locks the bundled DLLs. The script
@@ -152,21 +190,22 @@ because a regex missed would be worse than reporting the gap.
 Edit `src/email_triage/resources/concerns.json`, copy any block, then:
 
 ```bash
-py -3.14 -m email_triage check-config
+PYTHONPATH=src py -3.14 -m email_triage check-config    # from a bare checkout
+py -3.14 -m email_triage check-config                   # after pip install -e .
 ```
 
 Write **prototypes** as descriptions of what the sender wants, not as keywords —
 they are embedded and compared semantically. Reference regexes from
 `patterns.library.json` by `pattern_ref`; do not write regex in `concerns.json`.
 
-## The UI is a harness, not the product
+## The UI is for teaching, not for shipping
 
-`run_ui.py` opens a window that takes a pasted email body and shows the concern,
-the extracted fields, the per-layer scores, and the JSON. It stands in for the
-mail integration, which is not settled yet (the client uses a web-based mail
-system, so Outlook COM may be replaced — see `pipeline.md`).
+`run_ui.py` opens a window that takes a pasted subject and body and shows the
+concern, the extracted fields, the per-layer scores, and the JSON. **Its only
+job is teaching the model.** It is not the integration path and it is not meant
+to sit in anyone's daily workflow — your app calls `classify_email` directly.
 
-The part that matters long term is the **Teach** bar at the bottom. Correcting a
+The part that matters is the **Teach** bar at the bottom. Correcting a
 prediction and saving appends a row to `data/dataset.jsonl` containing the exact
 input, the full prediction with per-layer scores, and the human's label. Those
 rows are the labelled dataset that tunes or trains the next version.
@@ -198,7 +237,7 @@ Real emails carry claimant PII/PHI.
 ## Repo layout
 
 ```
-src/email_triage/
+src/email_triage/          THE ENGINE - this is what a host app imports
   api.py           classify_email / classify_emails   <- the stable contract
   engine.py        fusion, decision ladder, TriageEngine
   layers.py        the three scoring layers
@@ -207,11 +246,20 @@ src/email_triage/
   config.py        loads + compiles concerns.json
   render.py        plain text, JSON, training records
   resources/       concerns.json, patterns.library.json, model/
-  ui/              Tk demo (optional; engine does not depend on it)
+  __main__.py      CLI: check-config, classify   (no tkinter in this package)
+
+src/email_triage_ui/       THE TEACHING WINDOW - optional, never shipped to a host
+  app.py           the window, the Teach bar
+  theme.py         dark ttk theme
+  selftest.py      headless bundle diagnostic (--selftest)
+
 scripts/fetch_model.py
 tests/
 pipeline.md        active work items
 ```
+
+The arrow only points one way: `email_triage_ui` imports `email_triage`, never
+the reverse.
 
 ## Interpreter
 

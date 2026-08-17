@@ -1,10 +1,11 @@
-"""Tkinter harness for the triage engine.
+"""Tkinter harness for teaching the triage engine.
 
-This stands in for the eventual mail integration: paste a body, see exactly what
-the NLP concluded and why. The correction bar at the bottom is the part that
-matters long term - every saved row becomes a labelled training example.
+This is a teaching tool, not the product. Paste a body, see exactly what the
+NLP concluded and why, then correct it - every saved row becomes a labelled
+training example for the MiniLM prototypes and the keyword rules.
 
-Nothing here is required by the engine. `classify_email` is the real product.
+The engine imports nothing from this package. A host application integrates
+with `email_triage.classify_email(body, subject)` and never ships this window.
 """
 
 from __future__ import annotations
@@ -16,15 +17,17 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from ..engine import TriageEngine
-from ..render import (
+from email_triage.engine import TriageEngine
+from email_triage.render import (
     append_training_record,
     build_training_record,
     to_json,
     to_plain_text,
 )
-from ..types import TriageResult, TriageStatus
+from email_triage.types import TriageResult
+
 from . import theme as th
+
 
 def _dataset_dir() -> Path:
     """Where captured training rows land.
@@ -107,8 +110,10 @@ class TriageApp:
         self._queue: queue.Queue = queue.Queue()
 
         root.title("Email Triage - NLP Demo")
-        root.geometry("1360x860")
-        root.minsize(1120, 720)
+        # 20% smaller than the original 1360x860 / 1120x720. Text shrinks with
+        # it via the Tk scaling call in main(), so proportions are unchanged.
+        root.geometry("1088x688")
+        root.minsize(896, 576)
 
         self._build_header()
         self._build_body()
@@ -124,7 +129,7 @@ class TriageApp:
     # ---------------------------------------------------------------- header
 
     def _build_header(self) -> None:
-        bar = ttk.Frame(self.root, style="TFrame", padding=(22, 18, 22, 14))
+        bar = ttk.Frame(self.root, style="TFrame", padding=(18, 14, 18, 11))
         bar.pack(fill="x")
 
         left = ttk.Frame(bar, style="TFrame")
@@ -142,14 +147,14 @@ class TriageApp:
         self.engine_pill.pack(side="right")
         self.engine_pill.set("STARTING", th.NEUTRAL)
         self.engine_label = ttk.Label(right, text="loading engine...", style="Dim.TLabel")
-        self.engine_label.pack(side="right", padx=(0, 12))
+        self.engine_label.pack(side="right", padx=(0, 10))
 
         ttk.Frame(self.root, style="Divider.TFrame", height=1).pack(fill="x")
 
     # ------------------------------------------------------------------ body
 
     def _build_body(self) -> None:
-        wrap = ttk.Frame(self.root, style="TFrame", padding=(18, 16, 18, 8))
+        wrap = ttk.Frame(self.root, style="TFrame", padding=(14, 13, 14, 6))
         wrap.pack(fill="both", expand=True)
 
         split = ttk.Panedwindow(wrap, orient="horizontal", style="Dark.TPanedwindow")
@@ -159,7 +164,7 @@ class TriageApp:
         split.add(self._build_output_panel(split), weight=56)
 
     def _build_input_panel(self, parent: tk.Misc) -> ttk.Frame:
-        panel = ttk.Frame(parent, style="Surface.TFrame", padding=16)
+        panel = ttk.Frame(parent, style="Surface.TFrame", padding=13)
 
         head = ttk.Frame(panel, style="Surface.TFrame")
         head.pack(fill="x")
@@ -169,7 +174,7 @@ class TriageApp:
         ).pack(side="right")
 
         ttk.Label(panel, text="Subject (optional)", style="DimSurface.TLabel").pack(
-            anchor="w", pady=(14, 5)
+            anchor="w", pady=(11, 4)
         )
         self.subject_var = tk.StringVar()
         ttk.Entry(
@@ -177,7 +182,7 @@ class TriageApp:
         ).pack(fill="x")
 
         ttk.Label(panel, text="Email body", style="DimSurface.TLabel").pack(
-            anchor="w", pady=(14, 5)
+            anchor="w", pady=(11, 4)
         )
         holder = ttk.Frame(panel, style="Surface.TFrame")
         holder.pack(fill="both", expand=True)
@@ -193,21 +198,21 @@ class TriageApp:
         self.body_text.tag_configure("placeholder", foreground=th.TEXT_FAINT)
 
         actions = ttk.Frame(panel, style="Surface.TFrame")
-        actions.pack(fill="x", pady=(14, 0))
+        actions.pack(fill="x", pady=(11, 0))
         self.analyze_btn = ttk.Button(
             actions, text="Analyze", style="Accent.TButton", command=self._analyze
         )
         self.analyze_btn.pack(side="left")
         ttk.Button(
             actions, text="Load sample", style="Ghost.TButton", command=self._load_sample
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(6, 0))
         ttk.Button(
             actions, text="Clear", style="Ghost.TButton", command=self._clear
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(6, 0))
         return panel
 
     def _build_output_panel(self, parent: tk.Misc) -> ttk.Frame:
-        panel = ttk.Frame(parent, style="TFrame", padding=(14, 0, 0, 0))
+        panel = ttk.Frame(parent, style="TFrame", padding=(11, 0, 0, 0))
 
         self.tabs = ttk.Notebook(panel, style="Dark.TNotebook")
         self.tabs.pack(fill="both", expand=True)
@@ -218,10 +223,10 @@ class TriageApp:
         return panel
 
     def _build_summary_tab(self, parent: tk.Misc) -> ttk.Frame:
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=18)
+        tab = ttk.Frame(parent, style="Surface.TFrame", padding=14)
 
         # ---- concern card ------------------------------------------------
-        card = ttk.Frame(tab, style="Card.TFrame", padding=18)
+        card = ttk.Frame(tab, style="Card.TFrame", padding=14)
         card.pack(fill="x")
 
         row = ttk.Frame(card, style="Card.TFrame")
@@ -235,22 +240,22 @@ class TriageApp:
         self.concern_id_label = ttk.Label(card, text="", style="DimCard.TLabel")
         self.concern_id_label.pack(anchor="w")
 
-        ttk.Label(card, text="REASON", style="DimCard.TLabel").pack(anchor="w", pady=(14, 0))
+        ttk.Label(card, text="REASON", style="DimCard.TLabel").pack(anchor="w", pady=(11, 0))
         self.reason_label = ttk.Label(card, text="-", style="Mono.TLabel")
         self.reason_label.pack(anchor="w", pady=(2, 0))
 
         meter_row = ttk.Frame(card, style="Card.TFrame")
-        meter_row.pack(fill="x", pady=(16, 0))
-        self.meter = th.Meter(meter_row, width=260, bg=th.ELEVATED)
+        meter_row.pack(fill="x", pady=(13, 0))
+        self.meter = th.Meter(meter_row, width=208, bg=th.ELEVATED)
         self.meter.pack(side="left")
         self.conf_label = ttk.Label(meter_row, text="", style="Mono.TLabel")
-        self.conf_label.pack(side="left", padx=(12, 0))
+        self.conf_label.pack(side="left", padx=(10, 0))
         self.decision_label = ttk.Label(card, text="", style="DimCard.TLabel")
-        self.decision_label.pack(anchor="w", pady=(8, 0))
+        self.decision_label.pack(anchor="w", pady=(6, 0))
 
         # ---- fields ------------------------------------------------------
         ttk.Label(tab, text="DATA NEEDED", style="DimSurface.TLabel").pack(
-            anchor="w", pady=(20, 6)
+            anchor="w", pady=(16, 5)
         )
         tree_holder = ttk.Frame(tab, style="Surface.TFrame")
         tree_holder.pack(fill="both", expand=True)
@@ -260,10 +265,12 @@ class TriageApp:
             tree_holder, columns=cols, show="headings", style="Dark.Treeview", height=8
         )
         for key, label, width, anchor in (
-            ("field", "FIELD", 170, "w"),
-            ("value", "VALUE", 190, "w"),
-            ("req", "REQUIRED", 90, "center"),
-            ("source", "FOUND VIA", 250, "w"),
+            # Trimmed past a flat 20% so the natural width of the body still
+            # fits inside the smaller window; "source" stretches into any slack.
+            ("field", "FIELD", 130, "w"),
+            ("value", "VALUE", 148, "w"),
+            ("req", "REQUIRED", 70, "center"),
+            ("source", "FOUND VIA", 170, "w"),
         ):
             self.tree.heading(key, text=label)
             self.tree.column(key, width=width, anchor=anchor, stretch=(key == "source"))
@@ -280,20 +287,20 @@ class TriageApp:
         self.tree.tag_configure("optional_missing", foreground=th.TEXT_FAINT)
         self.tree.tag_configure("history", foreground=th.WARN)
 
-        self.warn_label = ttk.Label(tab, text="", style="DimSurface.TLabel", wraplength=620)
-        self.warn_label.pack(anchor="w", pady=(10, 0))
+        self.warn_label = ttk.Label(tab, text="", style="DimSurface.TLabel", wraplength=496)
+        self.warn_label.pack(anchor="w", pady=(8, 0))
         return tab
 
     def _build_text_tab(self, parent: tk.Misc) -> ttk.Frame:
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=12)
+        tab = ttk.Frame(parent, style="Surface.TFrame", padding=10)
         self.plain_out, _ = self._readonly_text(tab)
         return tab
 
     def _build_json_tab(self, parent: tk.Misc) -> ttk.Frame:
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=12)
+        tab = ttk.Frame(parent, style="Surface.TFrame", padding=10)
         self.json_out, _ = self._readonly_text(tab)
         bar = ttk.Frame(tab, style="Surface.TFrame")
-        bar.pack(fill="x", pady=(10, 0))
+        bar.pack(fill="x", pady=(8, 0))
         ttk.Button(
             bar, text="Copy JSON", style="Ghost.TButton", command=self._copy_json
         ).pack(side="left")
@@ -301,7 +308,7 @@ class TriageApp:
             bar,
             text="This shape is what a host system consumes, and what training rows embed.",
             style="DimSurface.TLabel",
-        ).pack(side="left", padx=(12, 0))
+        ).pack(side="left", padx=(10, 0))
         return tab
 
     def _readonly_text(self, parent: tk.Misc) -> tuple[tk.Text, ttk.Scrollbar]:
@@ -321,26 +328,26 @@ class TriageApp:
 
     def _build_correction_bar(self) -> None:
         ttk.Frame(self.root, style="Divider.TFrame", height=1).pack(fill="x")
-        bar = ttk.Frame(self.root, style="TFrame", padding=(22, 12, 22, 16))
+        bar = ttk.Frame(self.root, style="TFrame", padding=(18, 10, 18, 13))
         bar.pack(fill="x")
 
-        ttk.Label(bar, text="TEACH", style="Dim.TLabel").pack(side="left", padx=(0, 14))
+        ttk.Label(bar, text="TEACH", style="Dim.TLabel").pack(side="left", padx=(0, 11))
 
         ttk.Label(bar, text="Correct concern:", style="Dim.TLabel").pack(side="left")
         self.correction_var = tk.StringVar()
         self.correction_box = ttk.Combobox(
             bar, textvariable=self.correction_var, state="readonly",
-            style="Dark.TCombobox", width=24, font=self.fonts.body,
+            style="Dark.TCombobox", width=22, font=self.fonts.body,
         )
-        self.correction_box.pack(side="left", padx=(8, 16))
+        self.correction_box.pack(side="left", padx=(6, 13))
 
         ttk.Label(bar, text="Reason:", style="Dim.TLabel").pack(side="left")
         self.reason_correction_var = tk.StringVar()
         self.reason_correction_box = ttk.Combobox(
             bar, textvariable=self.reason_correction_var, state="readonly",
-            style="Dark.TCombobox", width=26, font=self.fonts.body,
+            style="Dark.TCombobox", width=24, font=self.fonts.body,
         )
-        self.reason_correction_box.pack(side="left", padx=(8, 16))
+        self.reason_correction_box.pack(side="left", padx=(6, 13))
         self.reason_correction_box.configure(values=["(prediction is correct)"])
         self.reason_correction_var.set("(prediction is correct)")
 
@@ -348,8 +355,8 @@ class TriageApp:
         self.note_var = tk.StringVar()
         ttk.Entry(
             bar, textvariable=self.note_var, style="Dark.TEntry",
-            font=self.fonts.body, width=34,
-        ).pack(side="left", padx=(8, 16))
+            font=self.fonts.body, width=28,
+        ).pack(side="left", padx=(6, 13))
 
         self.save_btn = ttk.Button(
             bar, text="Save to dataset", style="Ghost.TButton",
@@ -358,7 +365,7 @@ class TriageApp:
         self.save_btn.pack(side="left")
 
         self.save_status = ttk.Label(bar, text="", style="Dim.TLabel")
-        self.save_status.pack(side="left", padx=(14, 0))
+        self.save_status.pack(side="left", padx=(11, 0))
 
     # ------------------------------------------------------------- behaviour
 
@@ -592,89 +599,16 @@ class TriageApp:
         self.note_var.set("")
 
 
-def selftest() -> int:
-    """Headless check that the frozen bundle actually works.
-
-    A windowed exe swallows stdout and shows tracebacks in a modal, so this
-    writes a report next to the executable instead. Also the field-diagnostic
-    for "it won't start on this machine".
-    """
-    import json
-    import platform
-
-    report: dict = {
-        "python": sys.version,
-        "frozen": bool(getattr(sys, "frozen", False)),
-        "executable": sys.executable,
-        "machine": platform.machine(),
-        "resources_dir": None,
-        "ok": False,
-    }
-    try:
-        from ..config import RESOURCES
-        from ..engine import TriageEngine
-
-        report["resources_dir"] = str(RESOURCES)
-        report["resources_exist"] = RESOURCES.is_dir()
-
-        eng = TriageEngine()
-        report["embeddings_active"] = eng.embeddings_active
-        report["layers"] = list(eng.layers_used)
-        report["concern_ids"] = list(eng.concern_ids)
-
-        r = eng.classify(
-            "Bill status please.\n"
-            "Claim ID: WC7788991\n"
-            "DOS: 05/01/2026\n"
-            "DOI: 04/02/2026\n"
-            "DOB: 11/30/1979\n"
-            "Prov TIN: 98-7654321\n"
-            "Patient Account: PA5512399\n"
-            "Expected amount: $3,410.55\n",
-            subject="Bill status",
-        )
-        report["result"] = {
-            "concern_id": r.concern_id,
-            "reason_id": r.reason_id,
-            "status": r.status.value,
-            "confidence": round(r.confidence, 3),
-            "values": r.values,
-            "elapsed_ms": round(r.elapsed_ms, 1),
-        }
-        # Checks all seven fields, and specifically that DOS/DOI/DOB stayed
-        # distinct - the failure this bundle is most likely to regress on.
-        report["ok"] = r.concern_id == "bill_status" and r.values == {
-            "claim_id": "WC7788991",
-            "date_of_service": "2026-05-01",
-            "date_of_injury": "2026-04-02",
-            "date_of_birth": "1979-11-30",
-            "provider_tin": "987654321",
-            "patient_account": "PA5512399",
-            "expected_amount": "3410.55",
-        }
-    except Exception as exc:
-        import traceback
-
-        report["error"] = f"{type(exc).__name__}: {exc}"
-        report["traceback"] = traceback.format_exc()
-
-    base = (
-        Path(sys.executable).resolve().parent
-        if getattr(sys, "frozen", False)
-        else Path.cwd()
-    )
-    out = base / "selftest.json"
-    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(json.dumps(report, indent=2))
-    return 0 if report["ok"] else 1
-
-
 def main() -> None:
     if "--selftest" in sys.argv:
+        from .selftest import selftest
+
         raise SystemExit(selftest())
     root = tk.Tk()
     try:
-        root.tk.call("tk", "scaling", 1.25)
+        # Was 1.25. Dropping it to 1.0 is the 20% text shrink that matches the
+        # smaller window - scaling every font here beats editing twelve sizes.
+        root.tk.call("tk", "scaling", 1.0)
     except tk.TclError:
         pass
     TriageApp(root)

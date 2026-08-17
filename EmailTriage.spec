@@ -1,6 +1,6 @@
-# PyInstaller spec for the demo UI.
+# PyInstaller spec for the teaching UI.
 #
-# Scope note: this freezes the *demo harness* only. The library deliverable a
+# Scope note: this freezes `email_triage_ui` only. The library deliverable a
 # host system imports stays a wheel - a frozen exe cannot be imported by another
 # interpreter's main.py. See pipeline SP-1.1-31.
 #
@@ -38,14 +38,16 @@ for name in ("model_quint8_avx2.onnx", "tokenizer.json", "MANIFEST.json"):
 binaries = collect_dynamic_libs("onnxruntime")
 
 a = Analysis(
-    # Must be the launcher, not ui/app.py. PyInstaller runs the entry script as
-    # __main__ with no package context, which breaks relative imports.
+    # Must be the launcher, not email_triage_ui/app.py. PyInstaller runs the
+    # entry script as __main__ with no package context, which breaks relative
+    # imports.
     [str(PROJECT / "launcher.py")],
     pathex=[str(SRC)],
     binaries=binaries,
     datas=datas,
     hiddenimports=[
         "email_triage",
+        "email_triage_ui",
         "onnxruntime",
         "tokenizers",
         "numpy",
@@ -110,8 +112,9 @@ if not ONEFILE:
 # One-file trade-off, for whoever reads this next:
 #   - The bootloader unpacks ~122 MB (onnxruntime DLLs, Tk, the 22 MB encoder)
 #     to a temp dir on every launch, so cold start is seconds, not instant.
-#   - config.py already resolves resources through sys._MEIPASS, and app.py
-#     writes data/dataset.jsonl next to sys.executable - which stays the real
-#     exe path, not the temp dir. So both modes behave identically on disk.
+#   - config.py already resolves resources through sys._MEIPASS, and
+#     email_triage_ui/app.py writes data/dataset.jsonl next to sys.executable -
+#     which stays the real exe path, not the temp dir. So both modes behave
+#     identically on disk.
 #   - Locked-down endpoints sometimes block self-extracting exes outright. If
 #     the client's machine refuses to launch it, fall back to the one-dir zip.

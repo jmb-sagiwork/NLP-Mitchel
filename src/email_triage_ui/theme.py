@@ -3,6 +3,10 @@
 Tk's defaults look like 1998, so every widget that shows is restyled. ttk's
 'clam' engine is used as the base because it is the only built-in one that
 honours background colour on most widget elements.
+
+Every pixel measurement here is 20% below the original (SP-1.1-53). Font point
+sizes are unchanged - `app.main()` drops the Tk scaling factor instead, which
+shrinks all text by the same 20% in one place.
 """
 
 from __future__ import annotations
@@ -107,7 +111,7 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Accent.TButton",
         background=ACCENT, foreground="#ffffff", font=fonts.body_bold,
-        padding=(18, 9), borderwidth=0, relief="flat",
+        padding=(14, 7), borderwidth=0, relief="flat",
     )
     style.map(
         "Accent.TButton",
@@ -117,7 +121,7 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Ghost.TButton",
         background=ELEVATED, foreground=TEXT_DIM, font=fonts.body,
-        padding=(14, 9), borderwidth=0, relief="flat",
+        padding=(11, 7), borderwidth=0, relief="flat",
     )
     style.map(
         "Ghost.TButton",
@@ -129,12 +133,12 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Dark.TEntry",
         fieldbackground=ELEVATED, background=ELEVATED, foreground=TEXT,
-        insertcolor=ACCENT, borderwidth=0, relief="flat", padding=8,
+        insertcolor=ACCENT, borderwidth=0, relief="flat", padding=6,
     )
     style.configure(
         "Dark.TCombobox",
         fieldbackground=ELEVATED, background=ELEVATED, foreground=TEXT,
-        arrowcolor=TEXT_DIM, borderwidth=0, relief="flat", padding=6,
+        arrowcolor=TEXT_DIM, borderwidth=0, relief="flat", padding=5,
     )
     style.map(
         "Dark.TCombobox",
@@ -154,7 +158,7 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Dark.TNotebook.Tab",
         background=BG, foreground=TEXT_FAINT, font=fonts.small,
-        padding=(16, 9), borderwidth=0,
+        padding=(13, 7), borderwidth=0,
     )
     style.map(
         "Dark.TNotebook.Tab",
@@ -166,12 +170,12 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Dark.Treeview",
         background=ELEVATED, fieldbackground=ELEVATED, foreground=TEXT,
-        borderwidth=0, rowheight=27, font=fonts.body,
+        borderwidth=0, rowheight=22, font=fonts.body,
     )
     style.configure(
         "Dark.Treeview.Heading",
         background=SURFACE, foreground=TEXT_DIM, font=fonts.tiny,
-        relief="flat", padding=(8, 7),
+        relief="flat", padding=(6, 6),
     )
     style.map(
         "Dark.Treeview.Heading",
@@ -188,7 +192,7 @@ def apply_theme(root: tk.Tk) -> Fonts:
         "Dark.Vertical.TScrollbar",
         background=SURFACE, troughcolor=BG, bordercolor=BG,
         arrowcolor=TEXT_FAINT, darkcolor=SURFACE, lightcolor=SURFACE,
-        borderwidth=0, relief="flat", arrowsize=12,
+        borderwidth=0, relief="flat", arrowsize=10,
     )
     style.map("Dark.Vertical.TScrollbar", background=[("active", BORDER)])
 
@@ -211,8 +215,8 @@ def text_widget(parent: tk.Misc, fonts: Fonts, *, mono: bool = False, **kw) -> t
         highlightthickness=1,
         highlightbackground=BORDER_SOFT,
         highlightcolor=ACCENT_DIM,
-        padx=12,
-        pady=10,
+        padx=10,
+        pady=8,
         wrap="word",
         font=fonts.mono if mono else fonts.body,
         undo=True,
@@ -225,7 +229,7 @@ class Pill(tk.Canvas):
     """Rounded status chip. Tk has no rounded rectangle, so it is drawn."""
 
     def __init__(self, parent: tk.Misc, fonts: Fonts, *, bg: str = ELEVATED) -> None:
-        super().__init__(parent, height=24, width=130, bg=bg,
+        super().__init__(parent, height=19, width=104, bg=bg,
                          highlightthickness=0, borderwidth=0)
         self._fonts = fonts
         self._bg = bg
@@ -233,9 +237,9 @@ class Pill(tk.Canvas):
     def set(self, text: str, color: str) -> None:
         self.delete("all")
         f = self._fonts.tiny
-        pad = 11
+        pad = 9
         w = f.measure(text) + pad * 2
-        h = 22
+        h = 18
         self.configure(width=w, height=h)
         r = h // 2
         # Rounded rect from two arcs plus a joining rectangle.
@@ -248,8 +252,10 @@ class Pill(tk.Canvas):
 class Meter(tk.Canvas):
     """Flat confidence bar with threshold ticks."""
 
-    def __init__(self, parent: tk.Misc, *, width: int = 240, bg: str = ELEVATED) -> None:
-        super().__init__(parent, height=8, width=width, bg=bg,
+    HEIGHT = 6
+
+    def __init__(self, parent: tk.Misc, *, width: int = 192, bg: str = ELEVATED) -> None:
+        super().__init__(parent, height=self.HEIGHT, width=width, bg=bg,
                          highlightthickness=0, borderwidth=0)
         # NOT self._w -- that is Tkinter's internal widget path.
         self._track_width = width
@@ -257,11 +263,11 @@ class Meter(tk.Canvas):
     def set(self, fraction: float, color: str, *, ticks: tuple[float, ...] = ()) -> None:
         self.delete("all")
         w = self._track_width
-        h = 8
-        self.create_rectangle(0, 2, w, h - 1, fill=BORDER, outline=BORDER)
+        h = self.HEIGHT
+        self.create_rectangle(0, 1, w, h - 1, fill=BORDER, outline=BORDER)
         filled = max(0.0, min(fraction, 1.0)) * w
         if filled > 0:
-            self.create_rectangle(0, 2, filled, h - 1, fill=color, outline=color)
+            self.create_rectangle(0, 1, filled, h - 1, fill=color, outline=color)
         for t in ticks:
             x = t * w
             self.create_line(x, 0, x, h, fill=TEXT_FAINT, width=1)

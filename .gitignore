@@ -28,5 +28,6 @@ venv/
 # Tooling / editor
 .tokensave/
 .claude/
+graphify-out/
 .vscode/
 .idea/
