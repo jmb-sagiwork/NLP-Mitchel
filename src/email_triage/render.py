@@ -49,8 +49,6 @@ def to_plain_text(result: TriageResult) -> str:
     add(f"Concern ID      : {result.concern_id or '-'}")
     if result.reason_id:
         add(f"Reason          : {result.reason_display_name}")
-    else:
-        add(f"Reason          : (none stated in this email)")
     add(f"Status          : {_STATUS_GLYPH.get(result.status, '')} {result.status.value}")
     add(f"Confidence      : {result.confidence:.0%}   (margin {result.margin:+.3f})")
     add(f"Needs review    : {'YES' if result.needs_review else 'no'}")
@@ -70,14 +68,30 @@ def to_plain_text(result: TriageResult) -> str:
         else:
             mark = "x"
             add(f"  [{mark}] {f.display_name} ({tag})")
-            add(f"        value      : {f.value}")
-            if f.raw and f.raw.strip() != f.value:
+            values = f.all_values
+            if len(values) == 1:
+                add(f"        value      : {values[0]}")
+            else:
+                add(f"        values ({len(values)}):")
+                for index, value in enumerate(values, start=1):
+                    add(f"          {index}. {value}")
+            if len(values) == 1 and f.raw and f.raw.strip() != f.value:
                 add(f"        as written : {f.raw}")
             add(f"        found via  : {f.strategy}  in {f.segment}")
             if f.from_history:
                 add(f"        NOTE       : taken from quoted history, verify it is current")
-            if len(f.candidates) > 1:
+            if len(values) == 1 and len(f.candidates) > 1:
                 add(f"        others seen: {', '.join(f.candidates[1:])}")
+
+    if result.line_items:
+        add("")
+        add("PAIRED INQUIRIES")
+        for index, item in enumerate(result.line_items, start=1):
+            parts = []
+            for name, value in item.fields.items():
+                field = result.fields.get(name)
+                parts.append(f"{field.display_name if field else name}: {value}")
+            add(f"  {index}. {' | '.join(parts)}")
     add("")
 
     if result.missing_fields:
@@ -264,14 +278,13 @@ def to_explanation_text(
     add("Needs review   : " + ("YES" if result.needs_review else "no"))
     add("")
 
-    # ---- 4. the reason ----------------------------------------------------
-    add("=" * 68)
-    add("")
-    add(f"2. REASON  ->  {result.reason_display_name or '(none stated in this email)'}")
+    # ---- 4. the reason (only when the email actually states one) ----------
     if result.reason_id:
+        add("=" * 68)
+        add("")
+        add(f"2. REASON  ->  {result.reason_display_name}")
         add(f"   id: {result.reason_id}")
-    rule()
-    if result.reason_id:
+        rule()
         for chunk in _wrap(
             "The reason is a sub-classification INSIDE the concern above. It is "
             "scored rules-first, with embeddings only breaking ties, because "
@@ -286,27 +299,19 @@ def to_explanation_text(
             f"It scored {result.reason_confidence:.3f} against a bar of "
             f"{t['reason_accept']:.2f}."
         )
-    else:
-        for chunk in _wrap(
-            "No reason is reported. Either this concern declares no reasons, or no "
-            "reason had any supporting wording in the text. A reason is only "
-            "stated when the email actually says it - a near-miss is reported as "
-            "absent rather than guessed.",
-            66,
-        ):
-            add(f"  {chunk}")
-    add("")
-    if result.reason_alternatives:
-        add("Reasons considered, best first:")
-        for rid, score in result.reason_alternatives:
-            mark = "   <- chosen" if rid == result.reason_id else ""
-            add(f"  {rid:<44} {score:>6.3f}{mark}")
         add("")
+        if result.reason_alternatives:
+            add("Reasons considered, best first:")
+            for rid, score in result.reason_alternatives:
+                mark = "   <- chosen" if rid == result.reason_id else ""
+                add(f"  {rid:<44} {score:>6.3f}{mark}")
+            add("")
 
     # ---- 5. fields --------------------------------------------------------
     add("=" * 68)
     add("")
-    add("3. FIELDS - how each value was found")
+    fields_section = 3 if result.reason_id else 2
+    add(f"{fields_section}. FIELDS - how each value was found")
     rule()
     if not result.fields:
         add("  (this concern declares no fields)")
@@ -331,14 +336,32 @@ def to_explanation_text(
             )
         if f.from_history:
             add("        ^ taken from QUOTED HISTORY, so it may be stale")
-        if len(f.candidates) > 1:
+        if len(f.all_values) > 1:
+            add(
+                f"        ^ {len(f.all_values)} values found for repeated inquiries "
+                "(this is not ambiguity)"
+            )
+            for index, value in enumerate(f.all_values, start=1):
+                add(f"          {index}. {value}")
+        elif len(f.candidates) > 1:
             add(f"        ^ {len(f.candidates)} competing values were seen for this field")
+
+    if result.line_items:
+        add("")
+        add(f"  {len(result.line_items)} date/amount inquiry pair(s) preserved:")
+        for index, item in enumerate(result.line_items, start=1):
+            parts = []
+            for name, value in item.fields.items():
+                field = result.fields.get(name)
+                parts.append(f"{field.display_name if field else name}: {value}")
+            add(f"    {index}. {' | '.join(parts)}")
     add("")
 
     # ---- 6. what would change the answer ----------------------------------
     add("=" * 68)
     add("")
-    add("4. WHAT WOULD CHANGE THIS ANSWER")
+    change_section = 4 if result.reason_id else 3
+    add(f"{change_section}. WHAT WOULD CHANGE THIS ANSWER")
     rule()
     for item in _what_would_change(result, t, embeddings_active):
         wrapped = _wrap(item, 64)

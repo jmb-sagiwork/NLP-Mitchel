@@ -11,7 +11,7 @@ Label proximity wins when available, because "$1,250.00" next to the words
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .config import CompiledConcern, CompiledField, Config
 from .textprep import PreparedText
@@ -358,10 +358,11 @@ def extract_fields(
         pool.sort(key=lambda c: (-c.score, c.span[0]))
         best = pool[0]
 
-        # Document order, de-duplicated. For a multi_value field this is the
-        # answer; for a single-value field it is only provenance.
+        # Document order, de-duplicated by value. Confirmed line-item rows restore
+        # multiplicity below; doing it here would mistake a narrative that repeats
+        # a DOS for another inquiry.
         ordered = sorted(pool, key=lambda c: c.span[0])
-        all_values = tuple(dict.fromkeys(c.value for c in ordered))
+        all_values = tuple(dict.fromkeys(candidate.value for candidate in ordered))
 
         if f.multi_value:
             # Several dates of service in one email is the NORMAL case here,
@@ -493,3 +494,48 @@ def build_line_items(
             seen.add(key)
             out.append(it)
     return tuple(out)
+
+
+def restore_line_item_multiplicity(
+    fields: dict[str, FieldValue], line_items: tuple[LineItem, ...]
+) -> dict[str, FieldValue]:
+    """Restore equal values repeated on separate, confirmed inquiry rows.
+
+    General field extraction intentionally de-duplicates the same normalized
+    value because prose often repeats an identifier or DOS. A line item is
+    stronger evidence: every row carries all declared fields, so two rows with
+    the same billed amount are two inquiries and both must remain visible.
+    """
+    if not line_items:
+        return fields
+
+    names = {name for item in line_items for name in item.fields}
+    for name in names:
+        field = fields.get(name)
+        if field is None or not field.values:
+            continue
+        paired = tuple(
+            item.fields[name] for item in line_items if name in item.fields
+        )
+        remaining = list(field.values)
+        for value in paired:
+            if value in remaining:
+                remaining.remove(value)
+        combined = paired + tuple(remaining)
+        if combined and combined != field.values:
+            fields[name] = replace(field, value=combined[0], values=combined)
+    return fields
+
+
+def validate_line_items(
+    fields: dict[str, FieldValue], line_items: tuple[LineItem, ...]
+) -> tuple[LineItem, ...]:
+    """Keep only pairs whose values passed the normal field extraction rules."""
+    return tuple(
+        item
+        for item in line_items
+        if all(
+            name in fields and value in fields[name].values
+            for name, value in item.fields.items()
+        )
+    )

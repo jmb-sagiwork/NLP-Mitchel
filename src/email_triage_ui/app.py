@@ -56,6 +56,18 @@ SAMPLES = [
         "Expected amount: $3,410.55\n",
     ),
     (
+        "Multiple bill inquiries - five DOS/amount pairs",
+        "Good morning,\n\n"
+        "Would you please provide claim status for Claim # ZX8042719-6 "
+        "for the following dates of service?\n\n"
+        "11/21/2041 billed amount $246.80\n"
+        "11/24/2041 billed amount $1,357.90\n"
+        "11/27/2041 billed amount $468.20\n"
+        "12/01/2041 billed amount $579.30\n"
+        "12/04/2041 billed amount $680.40\n\n"
+        "Please send a copy of the EOB.\n",
+    ),
+    (
         "Bill status - completed and denied",
         "Good morning,\n\nThis bill has completed processing and was denied. "
         "Claim number ABC-00456789, date of service 02/02/2026, expected "
@@ -89,6 +101,36 @@ SAMPLES = [
         "Thanks, received. I'll follow up with the team next week.\n",
     ),
 ]
+
+
+def _field_tree_rows(result: TriageResult) -> list[tuple[tuple[str, str, str, str], str]]:
+    """Flatten fields into UI rows without discarding repeated inquiries."""
+    rows: list[tuple[tuple[str, str, str, str], str]] = []
+    for field in result.fields.values():
+        if field.value is None:
+            tag = "missing" if field.required else "optional_missing"
+            rows.append(
+                (
+                    (field.display_name, "NOT FOUND", "yes" if field.required else "no", "-"),
+                    tag,
+                )
+            )
+            continue
+
+        tag = "history" if field.from_history else "found"
+        source = f"{field.strategy}  ({field.segment})"
+        values = field.all_values
+        total = len(values)
+        for index, value in enumerate(values, start=1):
+            label = (
+                field.display_name
+                if total == 1
+                else f"{field.display_name} ({index}/{total})"
+            )
+            rows.append(
+                ((label, value, "yes" if field.required else "no", source), tag)
+            )
+    return rows
 
 
 class TriageApp:
@@ -233,7 +275,8 @@ class TriageApp:
         self.concern_id_label = ttk.Label(card, text="", style="DimCard.TLabel")
         self.concern_id_label.pack(anchor="w")
 
-        ttk.Label(card, text="REASON", style="DimCard.TLabel").pack(anchor="w", pady=(11, 0))
+        self.reason_heading = ttk.Label(card, text="REASON", style="DimCard.TLabel")
+        self.reason_heading.pack(anchor="w", pady=(11, 0))
         self.reason_label = ttk.Label(card, text="-", style="Mono.TLabel")
         self.reason_label.pack(anchor="w", pady=(2, 0))
 
@@ -258,7 +301,7 @@ class TriageApp:
             tree_holder, columns=cols, show="headings", style="Dark.Treeview", height=8
         )
         for key, label, width, anchor in (
-            # Widened alongside the font bump - "Input - Expected Amount" and
+            # Widened alongside the font bump - repeated field numbering and
             # "label_proximity:patient account" are the two that set the floor.
             # "source" stretches into whatever slack the window has.
             ("field", "FIELD", 170, "w"),
@@ -530,6 +573,8 @@ class TriageApp:
         self.concern_id_label.configure(text="")
         self.conf_label.configure(text="")
         self.reason_label.configure(text="")
+        self.reason_heading.pack_forget()
+        self.reason_label.pack_forget()
         self.warn_label.configure(text="")
         self.status_pill.set("READY", th.NEUTRAL)
         self.meter.set(0.0, th.NEUTRAL)
@@ -559,9 +604,17 @@ class TriageApp:
         self.conf_label.configure(text=f"{result.confidence:.0%}")
 
         if result.reason_id:
+            if not self.reason_heading.winfo_manager():
+                self.reason_heading.pack(
+                    anchor="w", pady=(11, 0), after=self.concern_id_label
+                )
+                self.reason_label.pack(
+                    anchor="w", pady=(2, 0), after=self.reason_heading
+                )
             self.reason_label.configure(text=result.reason_display_name)
         else:
-            self.reason_label.configure(text="(none stated in this email)")
+            self.reason_heading.pack_forget()
+            self.reason_label.pack_forget()
 
         self.decision_label.configure(
             text=f"decided by: {result.explanation.reason}   |   "
@@ -572,17 +625,10 @@ class TriageApp:
         self._refresh_reason_options(result.concern_id)
 
         self.tree.delete(*self.tree.get_children())
-        for f in result.fields.values():
-            if f.value is None:
-                tag = "missing" if f.required else "optional_missing"
-                value, source = "NOT FOUND", "-"
-            else:
-                tag = "history" if f.from_history else "found"
-                value = f.value
-                source = f"{f.strategy}  ({f.segment})"
+        for values, tag in _field_tree_rows(result):
             self.tree.insert(
                 "", "end",
-                values=(f.display_name, value, "yes" if f.required else "no", source),
+                values=values,
                 tags=(tag,),
             )
 
@@ -593,6 +639,10 @@ class TriageApp:
             warns.append(f"Ambiguous (competing values): {', '.join(result.ambiguous_fields)}")
         if any(f.from_history for f in result.fields.values()):
             warns.append("Some values came from quoted history - verify they are current.")
+        if len(result.line_items) > 1:
+            warns.append(
+                f"Multiple inquiries: {len(result.line_items)} paired DOS/amount row(s)."
+            )
         if not self.engine or not self.engine.embeddings_active:
             warns.append("Embedding layer inactive: confidence is capped at 70%.")
         self.warn_label.configure(text="\n".join(warns))

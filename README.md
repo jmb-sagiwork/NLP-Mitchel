@@ -60,13 +60,13 @@ to a lazily-built default, which is fine for a script and wasteful in a server.
 
 ## Download the demo (Windows, no install)
 
-**[EmailTriage-v0.1.1-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.1/EmailTriage-v0.1.1-windows-x64.exe)** — one self-contained 58 MB file. Download, double-click, done.
+**[EmailTriage-v0.1.2-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.2/EmailTriage-v0.1.2-windows-x64.exe)** — one self-contained 56 MB file. Download, double-click, done.
 
 The MiniLM encoder is **inside** the exe. No Python, no internet, no folder to
 keep together. Copy it anywhere and it runs.
 
-Fallback: **[EmailTriage-v0.1.1-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.1/EmailTriage-v0.1.1-windows-x64.zip)** — the same app as an unpacked folder
-(58 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
+Fallback: **[EmailTriage-v0.1.2-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.2/EmailTriage-v0.1.2-windows-x64.zip)** — the same app as an unpacked folder
+(approximately 57 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
 if the ~4 s cold start matters; keep that folder intact. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
 
 Run this first on any new machine:
@@ -97,7 +97,7 @@ email text and must stay on the client machine.**
 ```bash
 py -3.14 scripts/fetch_model.py     # one time, needs internet (23 MB)
 py -3.14 run_ui.py                  # teaching window
-py -3.14 -m pytest -q               # 62 tests
+py -3.14 -m pytest -q               # 103 tests
 ```
 
 Once the packages are installed (`pip install -e .`), the same two entry points

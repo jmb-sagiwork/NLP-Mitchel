@@ -7,9 +7,11 @@ Value comparison is normalized on both sides - the engine emits `2026-07-09`
 and `2288.60` where the sheet holds whatever the labeller wrote - so the
 comparison is about whether the same VALUE was found, not the same formatting.
 A ground-truth cell holding several values ("11/21/2041 | 11/24/2041") is scored
-as a SET against `FieldValue.values`: every value must be found and no extra
-one invented. Partial credit is reported separately as PARTIAL, so a field that
-finds 2 of 5 dates is not counted the same as one that finds all 5.
+as a SET against `FieldValue.values`: every distinct value must be found and no
+extra one invented. Row multiplicity is validated separately through line-item
+tests because the workbook's ground-truth cells store unique values only.
+Partial credit is reported separately as PARTIAL, so a field that finds 2 of 5
+dates is not counted the same as one that finds all 5.
 
     py -3.14 scripts/eval_samples.py
     py -3.14 scripts/eval_samples.py --verbose    # per-row detail

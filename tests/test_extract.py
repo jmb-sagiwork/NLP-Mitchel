@@ -110,6 +110,7 @@ def test_unlabelled_amount_is_refused(rules_engine):
     assert r.values["expected_amount"] is None
     assert "expected_amount" in r.missing_fields
     assert r.needs_review is True
+    assert r.line_items == ()
 
 
 def test_amount_is_not_taken_from_a_payment_already_issued(rules_engine):

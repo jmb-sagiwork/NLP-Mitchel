@@ -44,6 +44,13 @@ class FieldValue:
     # `value` stays the first, so single-value callers keep working.
     values: tuple[str, ...] = ()
 
+    @property
+    def all_values(self) -> tuple[str, ...]:
+        """Every extracted value, with a fallback for older/single-value callers."""
+        if self.values:
+            return self.values
+        return (self.value,) if self.value is not None else ()
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["span"] = list(self.span) if self.span else None

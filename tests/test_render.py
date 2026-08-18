@@ -9,7 +9,10 @@ from email_triage.render import (
     append_training_record,
     build_training_record,
     text_fingerprint,
+    to_explanation_text,
+    to_plain_text,
 )
+from email_triage_ui.app import _field_tree_rows
 
 BODY = "Bill status for Claim ID WC1234567, DOS 03/14/2026."
 
@@ -59,3 +62,49 @@ def test_fingerprint_is_stable_and_not_reversible():
     assert a == text_fingerprint("hello")
     assert a != text_fingerprint("hello ")
     assert "hello" not in a
+
+
+def test_repeated_inquiries_render_every_value_and_pair(rules_engine):
+    r = rules_engine.classify(
+        "Bill status for Claim # ZX8042719-6 for the following dates of service.\n"
+        "11/21/2041 billed amount $357.00\n"
+        "11/24/2041 billed amount $357.00\n"
+    )
+
+    plain = to_plain_text(r)
+    why = to_explanation_text(r, embeddings_active=False)
+    for value in ("2041-11-21", "2041-11-24", "357.00"):
+        assert value in plain
+        assert value in why
+    assert r.fields["expected_amount"].values == ("357.00", "357.00")
+    assert "PAIRED INQUIRIES" in plain
+    assert "(none stated in this email)" not in plain
+    assert "(none stated in this email)" not in why
+    assert "\nReason          :" not in plain
+    assert "2. REASON" not in why
+
+    rows = _field_tree_rows(r)
+    labels = [values[0] for values, _tag in rows]
+    assert "DOS (Date of Service) (1/2)" in labels
+    assert "DOS (Date of Service) (2/2)" in labels
+    assert "Expected Amount (1/2)" in labels
+    assert "Expected Amount (2/2)" in labels
+    assert all("Input - Expected Amount" not in label for label in labels)
+    amounts = [
+        values[1]
+        for values, _tag in rows
+        if values[0].startswith("Expected Amount")
+    ]
+    assert amounts == ["357.00", "357.00"]
+
+
+def test_stated_reason_still_appears_in_human_outputs(rules_engine):
+    r = rules_engine.classify(
+        "This bill completed processing and was denied. Claim ID ZX8042719-6. "
+        "DOS 11/21/2041. Billed amount $357.00."
+    )
+    assert r.reason_id == "completed_processing_denied"
+    assert "Reason          : Completed processing and denied" in to_plain_text(r)
+    assert "2. REASON  ->  Completed processing and denied" in to_explanation_text(
+        r, embeddings_active=False
+    )

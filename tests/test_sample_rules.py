@@ -25,6 +25,8 @@ def test_bill_status_requires_claim_dos_and_amount(rules_engine):
     concern = rules_engine.config.concern("bill_status")
     required = {f.name for f in concern.fields if f.required}
     assert required == {"claim_id", "date_of_service", "expected_amount"}
+    amount = next(f for f in concern.fields if f.name == "expected_amount")
+    assert amount.display_name == "Expected Amount"
 
 
 def test_claim_information_requires_nothing(rules_engine):
@@ -214,3 +216,26 @@ def test_same_line_bill_rows_keep_all_values_and_their_pairs(rules_engine):
     assert r.fields["date_of_service"].values == ("2041-11-21", "2041-11-24")
     assert r.fields["expected_amount"].values == ("246.80", "1357.90")
     assert len(r.line_items) == 2
+
+
+def test_multiple_claim_status_inquiries_keep_five_pairs(engine):
+    """A single message may ask about several bills on the same claim."""
+    r = engine.classify(
+        "Would you please provide claim status for Claim # ZX8042719-6; "
+        "DOB 12/30/1988; DOI 10/13/2043 for the following dates of service?\n\n"
+        "11/21/2043 billed amount $246\n"
+        "11/24/2043 billed amount $357\n"
+        "11/27/2043 billed amount $357\n"
+        "12/01/2043 billed amount $579\n"
+        "12/04/2043 billed amount $680\n\n"
+        "Please email a copy of the EOB."
+    )
+    assert r.concern_id == "bill_status"
+    assert r.explanation.reason == "decisive_rule"
+    assert r.fields["date_of_service"].values == (
+        "2043-11-21", "2043-11-24", "2043-11-27", "2043-12-01", "2043-12-04"
+    )
+    assert r.fields["expected_amount"].values == (
+        "246.00", "357.00", "357.00", "579.00", "680.00"
+    )
+    assert len(r.line_items) == 5
