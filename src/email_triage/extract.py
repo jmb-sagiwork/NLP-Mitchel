@@ -19,6 +19,8 @@ from .types import FieldValue, Segment
 
 # How far after a label to look for the value.
 _LABEL_WINDOW = 60
+# How far back to read when testing a label against reject_prefix.
+_PREFIX_LOOKBACK = 12
 
 
 # --------------------------------------------------------------------------
@@ -56,7 +58,10 @@ def _norm_date_iso(raw: str) -> str:
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
     if m:
         return s
-    m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$", s)
+    # Dots are in here to match us_date, which accepts them (SP-1.1-60).
+    # Widening the pattern without widening this leaves "03.11.1994" matching
+    # and then passing through unnormalized, which is worse than not matching.
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$", s)
     if m:
         mo, day, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
         if yr < 100:
@@ -113,14 +118,28 @@ def _label_spans(field: CompiledField, low: str) -> list[tuple[int, int, str]]:
     Aliases arrive sorted longest-first, so "claim id" claims its text before
     the bare "claim" can, and the shorter alias inside it is discarded. Without
     this the anchor lands mid-label and the value search starts too early.
+
+    `reject_prefix` then drops labels that are qualified by the words in front
+    of them: "Bill/Claim #" is the provider's own bill number, and "check
+    amount" is a payment already issued, not the amount billed.
     """
     spans: list[tuple[int, int, str]] = []
     for alias in field.label_aliases:
         for m in re.finditer(rf"\b{re.escape(alias)}\b", low):
             if any(m.start() < le and m.end() > ls for ls, le, _ in spans):
                 continue
+            before = low[max(0, m.start() - _PREFIX_LOOKBACK) : m.start()]
+            if any(before.endswith(p) for p in field.reject_prefix):
+                continue
             spans.append((m.start(), m.end(), alias))
     return spans
+
+
+def _blocked_spans(field: CompiledField, text: str) -> list[tuple[int, int]]:
+    """Character ranges another pattern owns, which this field may not claim."""
+    if field.exclude_pattern is None:
+        return []
+    return [span for _, span in field.exclude_pattern.finditer(text)]
 
 
 def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[Candidate]:
@@ -138,7 +157,10 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
         # and there is no second, non-overlapping match to fall back to.
         for ls, le, alias in labels:
             window = seg.text[le : le + _LABEL_WINDOW]
+            blocked = _blocked_spans(field, window)
             for raw, (ws, we) in field.pattern.finditer(window):
+                if any(ws < be and we > bs for bs, be in blocked):
+                    continue
                 value = normalize_value(raw, field.normalizer)
                 if not value:
                     continue
@@ -164,10 +186,13 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
             continue
 
         # --- unanchored fallback -------------------------------------------
+        seg_blocked = _blocked_spans(field, seg.text)
         for raw, (s, e) in field.pattern.finditer(seg.text):
             if any(s < ce and e > cs for cs, ce in claimed):
                 continue
             if any(s < le and e > ls for ls, le, _ in labels):
+                continue
+            if any(s < be and e > bs for bs, be in seg_blocked):
                 continue
             value = normalize_value(raw, field.normalizer)
             if not value:

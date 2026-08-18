@@ -7,6 +7,12 @@ data/
 out/
 *.jsonl
 !tests/fixtures/**/*.jsonl
+# Real inbound email samples: patient names, DOBs, claim numbers, TINs.
+# This repo is PUBLIC - these must never be staged. Ground truth derived from
+# them lives in SAMPLE_RULES.md with every identifier re-keyed.
+samples.xlsx
+*.xlsx
+~$*
 
 # Offline distribution artifacts
 wheels/

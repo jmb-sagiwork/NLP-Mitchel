@@ -48,8 +48,7 @@ def to_plain_text(result: TriageResult) -> str:
     add(f"Type of concern : {result.display_name or '(none identified)'}")
     add(f"Concern ID      : {result.concern_id or '-'}")
     if result.reason_id:
-        add(f"Reason          : {result.reason_display_name}  "
-            f"({result.reason_confidence:.0%})")
+        add(f"Reason          : {result.reason_display_name}")
     else:
         add(f"Reason          : (none stated in this email)")
     add(f"Status          : {_STATUS_GLYPH.get(result.status, '')} {result.status.value}")
@@ -104,6 +103,326 @@ def to_plain_text(result: TriageResult) -> str:
     add(f"Engine {result.engine_version} / config {result.config_version} "
         f"/ {result.elapsed_ms:.1f} ms")
     return "\n".join(lines)
+
+
+
+# --------------------------------------------------------------------------
+# narrated explanation
+# --------------------------------------------------------------------------
+
+# Plain-English gloss for every value `engine._decide` can put in
+# `explanation.reason`. Kept here rather than in the engine so the decision
+# codes stay short and machine-comparable.
+_DECISION_GLOSS = {
+    "decisive_rule": (
+        "Exactly one concern matched a phrase its config marks as DECISIVE, so it "
+        "was promoted to the top of the ranking outright - the fused scores below "
+        "did not get to overrule it."
+    ),
+    "threshold": (
+        "No decisive phrase fired, so the winner is simply the concern with the "
+        "highest fused score, and it cleared both the accept bar and the margin bar."
+    ),
+    "low_margin": (
+        "The winner cleared the confidence bar but not the margin bar: the "
+        "runner-up scored too close behind to call this settled."
+    ),
+    "low_confidence": (
+        "The winner beat its rivals but its own score sits between the review bar "
+        "and the accept bar - enough to name a concern, not enough to act on it."
+    ),
+    "below_review_threshold": (
+        "Nothing scored high enough to name at all, so no concern is reported "
+        "rather than a low-confidence guess being passed off as an answer."
+    ),
+    "background_class": (
+        "The background class ('not a tracked concern') outscored every real "
+        "concern. This reads as ordinary correspondence, not a tracked request."
+    ),
+    "missing_required_field": (
+        "A concern was identified, but a field it declares as REQUIRED could not "
+        "be found, so the result was demoted to AMBIGUOUS for a human to complete."
+    ),
+    "empty_input": "There was no text left to classify once quoting was stripped.",
+}
+
+_LAYER_GLOSS = (
+    "  emb    embedding  - MiniLM similarity between this email and the concern's\n"
+    "                      prototype sentences\n"
+    "  rule   keywords   - weighted phrases from the concern's keyword_rules,\n"
+    "                      squashed to 0..1\n"
+    "  struct structure  - whether the identifiers the concern expects (claim id,\n"
+    "                      and so on) are present\n"
+    "  fused             - the three above combined by the configured weights\n"
+    "  sat    saturation - evidence shrinkage: a concern with few prototypes is\n"
+    "                      capped low on purpose"
+)
+
+_DEFAULT_THRESHOLDS = {
+    "accept": 0.55,
+    "review": 0.35,
+    "margin": 0.12,
+    "reason_accept": 0.45,
+}
+
+
+def to_explanation_text(
+    result: TriageResult,
+    *,
+    thresholds: dict[str, float] | None = None,
+    embeddings_active: bool = True,
+) -> str:
+    """Narrate the decision: what won, what it beat, and what would flip it.
+
+    Every number here already exists in `result.explanation`; this reads it out
+    loud. It is what a reviewer opens before disagreeing with the engine, so it
+    names the specific phrase or the missing field that drove each step rather
+    than only the score that came out.
+    """
+    t = dict(_DEFAULT_THRESHOLDS)
+    t.update(thresholds or {})
+    ex = result.explanation
+    lines: list[str] = []
+    add = lines.append
+
+    def rule() -> None:
+        add("-" * 68)
+
+    add("=" * 68)
+    add("WHY THIS RESULT")
+    add("=" * 68)
+
+    # ---- 1. the concern ---------------------------------------------------
+    add("")
+    add(f"1. TYPE OF CONCERN  ->  {result.display_name or '(none identified)'}")
+    if result.concern_id:
+        add(f"   id: {result.concern_id}")
+    rule()
+    add(f"Decision code : {ex.reason}")
+    for chunk in _wrap(_DECISION_GLOSS.get(ex.reason, "No gloss for this code."), 66):
+        add(f"  {chunk}")
+    add("")
+
+    top = ex.scores[0] if ex.scores else None
+    if top is not None:
+        if top.decisive_hits:
+            add("Decisive phrase(s) matched in the text:")
+            for h in top.decisive_hits:
+                add(f'  * "{h}"')
+        else:
+            add("Decisive phrases: none matched.")
+        add("")
+        if top.keyword_hits:
+            add("Supporting keywords found:")
+            for h in top.keyword_hits:
+                add(f'  - "{h}"')
+        else:
+            add("Supporting keywords: none. This concern was carried by the")
+            add("  embedding layer alone.")
+        add("")
+        add(
+            "Structural gate: "
+            + (
+                "satisfied - the identifiers this concern expects are present."
+                if top.gate_satisfied
+                else "NOT satisfied - the identifiers this concern expects are"
+            )
+        )
+        if not top.gate_satisfied:
+            add("  absent, so its fused score was penalised.")
+        add("")
+
+    # ---- 2. the scoring table --------------------------------------------
+    add("How the concerns scored (ranked, highest first):")
+    add("")
+    add(f"  {'concern':<30} {'emb':>6} {'rule':>6} {'struct':>7} {'fused':>7} {'sat':>5}")
+    for s in ex.scores:
+        add(
+            f"  {s.concern_id:<30} {s.embedding:>6.3f} {s.rules:>6.3f} "
+            f"{s.structural:>7.3f} {s.fused:>7.3f} {s.saturation:>5.2f}"
+            + ("" if s.gate_satisfied else "   (gate failed)")
+        )
+    add("")
+    add(_LAYER_GLOSS)
+    add("")
+    if not embeddings_active:
+        add("NOTE: the embedding layer is not loaded, so 'emb' is 0.000 on every")
+        add("      row and confidence is capped at 70%. Rules and structure are")
+        add("      carrying the whole decision.")
+        add("")
+
+    # ---- 3. what it beat, and by how much ---------------------------------
+    if len(ex.scores) > 1:
+        runner = ex.scores[1]
+        add(f"Runner-up      : {runner.concern_id} at fused {runner.fused:.3f}")
+    add(f"Margin         : {result.margin:+.3f}   (must be >= {t['margin']:.3f})")
+    add(
+        f"Confidence     : {result.confidence:.0%}   "
+        f"(accept >= {t['accept']:.0%}, review >= {t['review']:.0%})"
+    )
+    add(f"Status         : {result.status.value}")
+    add("Needs review   : " + ("YES" if result.needs_review else "no"))
+    add("")
+
+    # ---- 4. the reason ----------------------------------------------------
+    add("=" * 68)
+    add("")
+    add(f"2. REASON  ->  {result.reason_display_name or '(none stated in this email)'}")
+    if result.reason_id:
+        add(f"   id: {result.reason_id}")
+    rule()
+    if result.reason_id:
+        for chunk in _wrap(
+            "The reason is a sub-classification INSIDE the concern above. It is "
+            "scored rules-first, with embeddings only breaking ties, because "
+            "reasons are stock dispositions stated near-verbatim rather than "
+            "paraphrased. Concern-level weights here would let the encoder invent "
+            "a disposition the email never mentions.",
+            66,
+        ):
+            add(f"  {chunk}")
+        add("")
+        add(
+            f"It scored {result.reason_confidence:.3f} against a bar of "
+            f"{t['reason_accept']:.2f}."
+        )
+    else:
+        for chunk in _wrap(
+            "No reason is reported. Either this concern declares no reasons, or no "
+            "reason had any supporting wording in the text. A reason is only "
+            "stated when the email actually says it - a near-miss is reported as "
+            "absent rather than guessed.",
+            66,
+        ):
+            add(f"  {chunk}")
+    add("")
+    if result.reason_alternatives:
+        add("Reasons considered, best first:")
+        for rid, score in result.reason_alternatives:
+            mark = "   <- chosen" if rid == result.reason_id else ""
+            add(f"  {rid:<44} {score:>6.3f}{mark}")
+        add("")
+
+    # ---- 5. fields --------------------------------------------------------
+    add("=" * 68)
+    add("")
+    add("3. FIELDS - how each value was found")
+    rule()
+    if not result.fields:
+        add("  (this concern declares no fields)")
+    for f in result.fields.values():
+        if f.value is None:
+            why = (
+                "no match, and this field is REQUIRED, so the result was demoted"
+                if f.required
+                else "no match; optional, so nothing was demoted"
+            )
+            add(f"  [ ] {f.display_name}: {why}")
+        elif f.strategy.startswith("label_proximity"):
+            alias = f.strategy.split(":", 1)[1]
+            add(
+                f'  [x] {f.display_name}: found next to the label "{alias}" '
+                f"in {f.segment}"
+            )
+        else:
+            add(
+                f"  [x] {f.display_name}: matched this field's pattern in "
+                f"{f.segment}, with no label nearby to confirm it"
+            )
+        if f.from_history:
+            add("        ^ taken from QUOTED HISTORY, so it may be stale")
+        if len(f.candidates) > 1:
+            add(f"        ^ {len(f.candidates)} competing values were seen for this field")
+    add("")
+
+    # ---- 6. what would change the answer ----------------------------------
+    add("=" * 68)
+    add("")
+    add("4. WHAT WOULD CHANGE THIS ANSWER")
+    rule()
+    for item in _what_would_change(result, t, embeddings_active):
+        wrapped = _wrap(item, 64)
+        add(f"  * {wrapped[0]}")
+        for chunk in wrapped[1:]:
+            add(f"    {chunk}")
+    add("")
+    add(f"Segments read  : {', '.join(ex.segments_seen) or '-'}")
+    add(f"Layers used    : {', '.join(ex.layers_used) or '-'}")
+    add(
+        f"Engine {result.engine_version} / config {result.config_version} "
+        f"/ {result.elapsed_ms:.1f} ms"
+    )
+    return "\n".join(lines)
+
+
+def _what_would_change(
+    result: TriageResult, t: dict[str, float], embeddings_active: bool
+) -> list[str]:
+    """The actionable half: the specific edit that would move this decision."""
+    out: list[str] = []
+    ex = result.explanation
+
+    if ex.reason == "decisive_rule":
+        out.append(
+            "Removing the decisive phrase from this concern's keyword_rules would "
+            "hand the decision back to the fused scores above."
+        )
+    if ex.reason in ("low_margin", "low_confidence", "below_review_threshold"):
+        out.append(
+            "Adding prototypes or keyword phrases to the intended concern in "
+            "concerns.json is the fix here - the gap is evidence, not thresholds."
+        )
+    if result.missing_fields:
+        out.append(
+            "Supplying the missing required field(s) - "
+            + ", ".join(result.missing_fields)
+            + " - would clear the demotion. The label itself never changes because "
+            "a field is missing."
+        )
+    if result.ambiguous_fields:
+        out.append(
+            ", ".join(result.ambiguous_fields)
+            + " had competing values within the ambiguity delta. Labelling the "
+            "intended one in the source text disambiguates it."
+        )
+    if ex.scores and ex.scores[0].saturation < 1.0:
+        out.append(
+            "This concern is still evidence-shrunk: it has fewer prototypes and "
+            "examples than the saturation target, so it cannot reach high "
+            "confidence no matter how well it matches. Add examples."
+        )
+    if ex.scores and not ex.scores[0].gate_satisfied:
+        out.append(
+            "The structural gate failed. Including the identifier this concern "
+            "expects would remove the penalty applied to its score."
+        )
+    if not embeddings_active:
+        out.append(
+            "The embedding model is not loaded. Restoring it turns the strongest of "
+            "the three layers back on and lifts the 70% confidence cap."
+        )
+    if not out:
+        out.append(
+            "Nothing here was marginal - the winner cleared every bar with room to "
+            "spare. If it is still wrong, the taxonomy is what needs the edit, not "
+            "this email."
+        )
+    return out
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    """Local word wrap. textwrap would be a second import for four lines."""
+    lines: list[str] = []
+    cur = ""
+    for word in text.split():
+        if cur and len(cur) + 1 + len(word) > width:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = f"{cur} {word}".strip()
+    if cur:
+        lines.append(cur)
+    return lines or [""]
 
 
 # --------------------------------------------------------------------------

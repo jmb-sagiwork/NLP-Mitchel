@@ -89,10 +89,34 @@ def test_provider_tin_prefers_hyphenated_form(rules_engine):
     assert r.fields["provider_tin"].raw == "98-7654321"
 
 
-def test_amount_is_found_without_a_label(rules_engine):
-    """expected_amount does not set require_label - currency is unambiguous."""
+def test_amount_is_found_from_prose_not_only_from_a_label_line(rules_engine):
+    """"The charge was $1,250.00" is a label too - "charge" is an alias."""
     r = rules_engine.classify(
         "Bill status for claim ID WC1234567. The charge was $1,250.00."
+    )
+    assert r.values["expected_amount"] == "1250.00"
+
+
+def test_unlabelled_amount_is_refused(rules_engine):
+    """expected_amount became required in config 0.3.0, so it sets require_label.
+
+    A real email carries several figures - billed, paid, check amount. Grabbing
+    an unanchored one would silently satisfy a REQUIRED field with the wrong
+    number and stop the email routing for review, which is worse than a blank.
+    """
+    r = rules_engine.classify(
+        "Bill status for claim ID WC1234567, DOS 03/14/2026. See $1,250.00 below."
+    )
+    assert r.values["expected_amount"] is None
+    assert "expected_amount" in r.missing_fields
+    assert r.needs_review is True
+
+
+def test_amount_is_not_taken_from_a_payment_already_issued(rules_engine):
+    """"Paid" and "check amount" are guarded by reject_prefix (SP-1.1-60)."""
+    r = rules_engine.classify(
+        "Bill status for claim ID WC1234567, DOS 03/14/2026.\n"
+        "Billed amount: $1,250.00\nPaid amount: $310.45\n"
     )
     assert r.values["expected_amount"] == "1250.00"
 

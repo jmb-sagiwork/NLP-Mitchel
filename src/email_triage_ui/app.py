@@ -20,6 +20,7 @@ from email_triage.render import (
     append_training_record,
     build_training_record,
     slugify_label,
+    to_explanation_text,
     to_json,
     to_plain_text,
 )
@@ -101,10 +102,10 @@ class TriageApp:
         self._queue: queue.Queue = queue.Queue()
 
         root.title("Email Triage - NLP Demo")
-        # 20% smaller than the original 1360x860 / 1120x720. Text shrinks with
-        # it via the Tk scaling call in main(), so proportions are unchanged.
-        root.geometry("1088x688")
-        root.minsize(896, 576)
+        # Widened from 1088x688 when the fonts were enlarged (SP-1.1-58): the
+        # type grew ~20% and the old window clipped the teach bar and the tree.
+        root.geometry("1320x840")
+        root.minsize(1080, 700)
 
         self._build_header()
         self._build_body()
@@ -211,6 +212,7 @@ class TriageApp:
         self.tabs.add(self._build_summary_tab(self.tabs), text="  Summary  ")
         self.tabs.add(self._build_text_tab(self.tabs), text="  Plain text  ")
         self.tabs.add(self._build_json_tab(self.tabs), text="  JSON  ")
+        self.tabs.add(self._build_why_tab(self.tabs), text="  Why this result  ")
         return panel
 
     def _build_summary_tab(self, parent: tk.Misc) -> ttk.Frame:
@@ -256,12 +258,13 @@ class TriageApp:
             tree_holder, columns=cols, show="headings", style="Dark.Treeview", height=8
         )
         for key, label, width, anchor in (
-            # Trimmed past a flat 20% so the natural width of the body still
-            # fits inside the smaller window; "source" stretches into any slack.
-            ("field", "FIELD", 130, "w"),
-            ("value", "VALUE", 148, "w"),
-            ("req", "REQUIRED", 70, "center"),
-            ("source", "FOUND VIA", 170, "w"),
+            # Widened alongside the font bump - "Input - Expected Amount" and
+            # "label_proximity:patient account" are the two that set the floor.
+            # "source" stretches into whatever slack the window has.
+            ("field", "FIELD", 170, "w"),
+            ("value", "VALUE", 180, "w"),
+            ("req", "REQUIRED", 90, "center"),
+            ("source", "FOUND VIA", 210, "w"),
         ):
             self.tree.heading(key, text=label)
             self.tree.column(key, width=width, anchor=anchor, stretch=(key == "source"))
@@ -278,7 +281,7 @@ class TriageApp:
         self.tree.tag_configure("optional_missing", foreground=th.TEXT_FAINT)
         self.tree.tag_configure("history", foreground=th.WARN)
 
-        self.warn_label = ttk.Label(tab, text="", style="DimSurface.TLabel", wraplength=496)
+        self.warn_label = ttk.Label(tab, text="", style="DimSurface.TLabel", wraplength=620)
         self.warn_label.pack(anchor="w", pady=(8, 0))
         return tab
 
@@ -298,6 +301,27 @@ class TriageApp:
         ttk.Label(
             bar,
             text="This shape is what a host system consumes, and what training rows embed.",
+            style="DimSurface.TLabel",
+        ).pack(side="left", padx=(10, 0))
+        return tab
+
+    def _build_why_tab(self, parent: tk.Misc) -> ttk.Frame:
+        """The narrated version of the JSON: which rule fired, and what it beat.
+
+        Everything shown here is already in `result.explanation`; the tab exists
+        because reading a fused score off a table is not the same as being told
+        why the concern won and why the reason was or was not stated.
+        """
+        tab = ttk.Frame(parent, style="Surface.TFrame", padding=10)
+        self.why_out, _ = self._readonly_text(tab)
+        bar = ttk.Frame(tab, style="Surface.TFrame")
+        bar.pack(fill="x", pady=(8, 0))
+        ttk.Button(
+            bar, text="Copy explanation", style="Ghost.TButton", command=self._copy_why
+        ).pack(side="left")
+        ttk.Label(
+            bar,
+            text="Disagree with any step below? Correct it in the TEACH bar and save.",
             style="DimSurface.TLabel",
         ).pack(side="left", padx=(10, 0))
         return tab
@@ -510,7 +534,7 @@ class TriageApp:
         self.status_pill.set("READY", th.NEUTRAL)
         self.meter.set(0.0, th.NEUTRAL)
         self.tree.delete(*self.tree.get_children())
-        for widget in (self.plain_out, self.json_out):
+        for widget in (self.plain_out, self.json_out, self.why_out):
             widget.configure(state="normal")
             widget.delete("1.0", "end")
             widget.configure(state="disabled")
@@ -535,9 +559,7 @@ class TriageApp:
         self.conf_label.configure(text=f"{result.confidence:.0%}")
 
         if result.reason_id:
-            self.reason_label.configure(
-                text=f"{result.reason_display_name}  ({result.reason_confidence:.0%})"
-            )
+            self.reason_label.configure(text=result.reason_display_name)
         else:
             self.reason_label.configure(text="(none stated in this email)")
 
@@ -577,6 +599,14 @@ class TriageApp:
 
         self._fill(self.plain_out, to_plain_text(result))
         self._fill(self.json_out, to_json(result))
+        self._fill(
+            self.why_out,
+            to_explanation_text(
+                result,
+                thresholds=self.engine.config.thresholds if self.engine else None,
+                embeddings_active=bool(self.engine and self.engine.embeddings_active),
+            ),
+        )
         self._reset_correction_inputs()
 
     def _refresh_reason_options(self, concern_id: str | None) -> None:
@@ -654,6 +684,19 @@ class TriageApp:
         self.root.clipboard_append(to_json(self.result))
         self.save_status.configure(text="JSON copied to clipboard")
 
+    def _copy_why(self) -> None:
+        if self.result is None:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(
+            to_explanation_text(
+                self.result,
+                thresholds=self.engine.config.thresholds if self.engine else None,
+                embeddings_active=bool(self.engine and self.engine.embeddings_active),
+            )
+        )
+        self.save_status.configure(text="explanation copied to clipboard")
+
     def _save_record(self) -> None:
         if self.result is None:
             return
@@ -716,8 +759,8 @@ def main() -> None:
     """Open the window. Flag handling lives in __main__, which routes here."""
     root = tk.Tk()
     try:
-        # Was 1.25. Dropping it to 1.0 is the 20% text shrink that matches the
-        # smaller window - scaling every font here beats editing twelve sizes.
+        # Left at 1.0 deliberately. Text size is set by the point sizes in
+        # theme.Fonts; scaling here would also inflate every padding value.
         root.tk.call("tk", "scaling", 1.0)
     except tk.TclError:
         pass

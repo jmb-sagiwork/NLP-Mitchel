@@ -75,6 +75,15 @@ class CompiledField:
     # a bare pattern match cannot be attributed to any of them. Such a field
     # accepts label-anchored candidates only, and reports nothing otherwise.
     require_label: bool = False
+    # Lowercase strings that disqualify a label when they sit immediately in
+    # front of it. "Bill/Claim #" and "Ref #" are the provider's own numbering,
+    # not the carrier claim id, and both turn up beside a real "Claim number"
+    # in the same email (SP-1.1-60).
+    reject_prefix: tuple[str, ...] = ()
+    # Name of another library pattern whose matches this field must not claim.
+    # Dates and money overlap once us_date accepts dots: "03.11.1994" offers
+    # "03.11" to currency_amount. The date wins and the money match is dropped.
+    exclude_pattern: CompiledPattern | None = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +262,18 @@ def _compile_field(
     )
     # Longest alias first so "claim number" wins over "claim".
     aliases = tuple(sorted(aliases, key=len, reverse=True))
+    reject_prefix = tuple(
+        str(r).strip().lower() for r in spec.get("reject_prefix", []) if str(r).strip()
+    )
+    exclude_ref = spec.get("exclude_pattern_ref")
+    exclude_pattern: CompiledPattern | None = None
+    if exclude_ref is not None:
+        if exclude_ref not in patterns:
+            raise ConfigError(
+                f"concern '{concern_id}', field '{name}': exclude_pattern_ref "
+                f"'{exclude_ref}' is not in patterns.library.json"
+            )
+        exclude_pattern = patterns[exclude_ref]
     require_label = bool(spec.get("require_label", False))
     if require_label and not aliases:
         raise ConfigError(
@@ -267,6 +288,8 @@ def _compile_field(
         label_aliases=aliases,
         normalizer=spec.get("normalizer", "trim"),
         require_label=require_label,
+        reject_prefix=reject_prefix,
+        exclude_pattern=exclude_pattern,
     )
 
 

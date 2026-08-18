@@ -1,405 +1,898 @@
 {
-  "config_version": "0.2.0",
-  "schema_version": "1.1.0",
-  "updated": "2026-08-14",
-
-  "_TAXONOMY_SOURCE": "Concerns, reasons and the seven extraction fields come from the user's operational list. Two levels: CONCERN is what the item is about (Bill Status, Claim Information); REASON is the sub-classification within it (completed processing, Not a bill on file, ...).",
-
-  "_OPEN_QUESTION": "The reasons read like DISPOSITIONS - the outcome recorded after an agent looks the bill up in the claims system - rather than like something an inbound email states. 'Completed processing and denied' is an answer, not a question. If that is right, reason is NOT predictable from email text alone and the reason layer here should be treated as advisory only; the engine still classifies CONCERN and extracts fields reliably. Confirm before trusting reason output.",
-
-  "_FIELD_REQUIREDNESS_ASSUMPTION": "Only claim_id is marked required. The user listed seven fields to extract but did not say which are mandatory per concern, and marking a field required makes every email lacking it route to human review. Tighten this once confirmed.",
-
-  "_HOW_TO_ADD_A_CONCERN": [
-    "1. Copy a block in 'concerns', give it a new unique 'id' and 'display_name'.",
-    "2. Write 3-5 'prototypes': plain-English sentences describing what the sender wants.",
-    "   These are embedded and compared semantically. Descriptions, not keywords.",
-    "3. Add 'examples': short realistic phrasings (identifiers faked, never real PHI).",
-    "4. Add 'keyword_rules.positive' phrases that are strong giveaways.",
-    "5. List 'fields'. Reference a regex by 'pattern_ref' - never write regex here.",
-    "   Set 'require_label': true whenever the pattern is shared with another field.",
-    "6. Optionally add 'reasons' for sub-classification, same prototype/keyword shape.",
-    "7. Run: python -m email_triage check-config",
-    "NOTE: confidence is shrunk when a concern has fewer than 4 prototypes+examples,",
-    "so a thin concern always routes to review until fleshed out (pipeline SP-1.1-20)."
-  ],
-
-  "defaults": {
-    "thresholds": {
-      "accept": 0.55,
-      "margin": 0.12,
-      "review": 0.35,
-      "field_ambiguity_delta": 0.10,
-      "reason_accept": 0.45
-    },
-    "fusion_weights": {
-      "embedding": 0.60,
-      "rules": 0.30,
-      "structural": 0.10
-    },
-    "embedding_temperature": 0.05,
-    "evidence_saturation_k": 4,
-    "search_quoted_history": true,
-    "history_decay": 0.9,
-    "segment_weights": {
-      "subject": 0.90,
-      "newest_body": 1.00,
-      "signature": 0.30,
-      "quoted_history": 0.55
-    }
+ "config_version": "0.3.2",
+ "schema_version": "1.1.0",
+ "updated": "2026-08-19",
+ "_TAXONOMY_SOURCE": "Concerns, reasons and the seven extraction fields come from the user's operational list. Two levels: CONCERN is what the item is about (Bill Status, Claim Information); REASON is the sub-classification within it. 0.3.0 applied the rules derived from 15 real inbound emails - see SAMPLE_RULES.md and samples.xlsx column M.",
+ "_OPEN_QUESTION": "SETTLED 2026-08-19 against 15 real emails: the reasons ARE dispositions, recorded after an agent looks the bill up, and inbound mail states none of them. Reason was blank on 14 of 15 samples; the only one that fired was 'Claim number request', which is the sole reason phrased as a request. Reason output is therefore ADVISORY. Concern and field extraction are the reliable outputs. Re-cutting reasons into things an email can actually say is still open - see SAMPLE_RULES.md Finding 1.",
+ "_FIELD_REQUIREDNESS_ASSUMPTION": "RESOLVED 2026-08-19 by the user: on Bill Status, claim_id, date_of_service and expected_amount are REQUIRED - these are the three an agent cannot action a bill without. Everything else stays optional. On Claim Information nothing is required, because that concern is the sender asking to BE GIVEN the claim number; requiring it would flag every such email by definition.",
+ "_HOW_TO_ADD_A_CONCERN": [
+  "1. Copy a block in 'concerns', give it a new unique 'id' and 'display_name'.",
+  "2. Write 3-5 'prototypes': plain-English sentences describing what the sender wants.",
+  "   These are embedded and compared semantically. Descriptions, not keywords.",
+  "3. Add 'examples': short realistic phrasings (identifiers faked, never real PHI).",
+  "4. Add 'keyword_rules.positive' phrases that are strong giveaways.",
+  "5. List 'fields'. Reference a regex by 'pattern_ref' - never write regex here.",
+  "   Set 'require_label': true whenever the pattern is shared with another field.",
+  "6. Optionally add 'reasons' for sub-classification, same prototype/keyword shape.",
+  "7. Run: python -m email_triage check-config",
+  "NOTE: confidence is shrunk when a concern has fewer than 4 prototypes+examples,",
+  "so a thin concern always routes to review until fleshed out (pipeline SP-1.1-20)."
+ ],
+ "defaults": {
+  "thresholds": {
+   "accept": 0.55,
+   "margin": 0.12,
+   "review": 0.35,
+   "field_ambiguity_delta": 0.1,
+   "reason_accept": 0.45
   },
-
-  "background_class": {
-    "id": "__other__",
-    "display_name": "Other / not a tracked concern",
-    "prototypes": [
-      "Thanks, received. I will get back to you shortly.",
-      "Please see the attached document for your records.",
-      "Scheduling a meeting to discuss this next week.",
-      "I am out of the office and will return on Monday.",
-      "Automated notification: your request has been processed.",
-      "Acknowledging receipt of your message below."
-    ]
+  "fusion_weights": {
+   "embedding": 0.6,
+   "rules": 0.3,
+   "structural": 0.1
   },
-
-  "_SHARED_FIELDS_NOTE": "DOS, DOI and DOB all resolve to the us_date pattern, and claim_id / patient_account / provider_tin all match digit runs. Every one of them sets require_label:true - without it the first date in the body would be assigned to all three date fields. See pipeline SP-1.1-38.",
-
-  "concerns": [
-    {
-      "id": "bill_status",
-      "display_name": "Bill Status",
-      "enabled": true,
-      "draft": false,
-      "priority": 10,
-      "description_internal": "Sender is asking about the status or disposition of a submitted bill on a claim - whether it processed, was denied, or cannot be located.",
-
-      "prototypes": [
-        "The sender is asking for the current status of a bill submitted on a workers compensation claim.",
-        "A provider wants to know whether a submitted bill has finished processing and what the outcome was.",
-        "Follow up asking why a bill was denied or reduced after processing.",
-        "The sender cannot find a submitted bill in the system and is asking whether it was received.",
-        "Request for an update on where a bill stands for a given date of service."
-      ],
-      "examples": [
-        "Can you check the status of the bill for claim WC1234567, DOS 03/14/2026?",
-        "Following up on this bill - has it completed processing yet?",
-        "We never received a response on this bill. Was it ever received on file?",
-        "Please advise the disposition of the charge submitted for this claim."
-      ],
-      "keyword_rules": {
-        "positive": [
-          { "phrase": "bill status", "weight": 3.5 },
-          { "phrase": "status of the bill", "weight": 3.5 },
-          { "phrase": "status of this bill", "weight": 3.5 },
-          { "phrase": "bill on file", "weight": 3.0 },
-          { "phrase": "completed processing", "weight": 3.0 },
-          { "phrase": "denied", "weight": 1.5 },
-          { "phrase": "disposition", "weight": 1.5 },
-          { "phrase": "date of service", "weight": 1.0 },
-          { "phrase": "follow up", "weight": 0.8 },
-          { "phrase": "bill", "weight": 0.6 }
-        ],
-        "negative": [
-          { "phrase": "claim number request", "weight": 3.0 },
-          { "phrase": "need a claim number", "weight": 3.0 }
-        ],
-        "decisive": [
-          { "all_of": ["bill status"] },
-          { "all_of": ["status of the bill"] },
-          { "all_of": ["bill on file"] }
-        ]
-      },
-      "structural_gate": {
-        "require_any_pattern": ["claim_id"],
-        "penalty_if_absent": 0.20
-      },
-
-      "reasons": [
-        {
-          "id": "completed_processing",
-          "display_name": "Completed processing",
-          "prototypes": [
-            "The bill finished processing and an outcome was issued.",
-            "Processing is complete on this bill and payment was determined."
-          ],
-          "examples": ["This bill has completed processing."],
-          "keyword_rules": {
-            "positive": [
-              { "phrase": "completed processing", "weight": 4.0 },
-              { "phrase": "finished processing", "weight": 3.0 },
-              { "phrase": "processed", "weight": 1.5 }
-            ],
-            "negative": [
-              { "phrase": "denied", "weight": 3.0 }
-            ],
-            "decisive": []
-          }
-        },
-        {
-          "id": "completed_processing_denied",
-          "display_name": "Completed processing and denied",
-          "prototypes": [
-            "The bill finished processing and the charge was denied.",
-            "Processing completed with a denial on the submitted charge."
-          ],
-          "examples": ["Completed processing and denied."],
-          "keyword_rules": {
-            "positive": [
-              { "phrase": "denied", "weight": 3.5 },
-              { "phrase": "denial", "weight": 3.0 },
-              { "phrase": "completed processing and denied", "weight": 5.0 }
-            ],
-            "negative": [],
-            "decisive": [{ "all_of": ["completed processing", "denied"] }]
-          }
-        },
-        {
-          "id": "not_a_bill_on_file",
-          "display_name": "Not a bill on file",
-          "prototypes": [
-            "No bill matching this claim and date of service exists in the system.",
-            "The submitted bill was never received and is not on file."
-          ],
-          "examples": ["Not a bill on file for this claim."],
-          "keyword_rules": {
-            "positive": [
-              { "phrase": "not a bill on file", "weight": 5.0 },
-              { "phrase": "no bill on file", "weight": 4.5 },
-              { "phrase": "not on file", "weight": 3.0 },
-              { "phrase": "never received", "weight": 2.0 },
-              { "phrase": "cannot locate", "weight": 2.0 }
-            ],
-            "negative": [],
-            "decisive": [
-              { "all_of": ["not a bill on file"] },
-              { "all_of": ["no bill on file"] }
-            ]
-          }
-        },
-        {
-          "id": "no_claim_on_file_missing_information",
-          "display_name": "No claim on file; Missing Information",
-          "prototypes": [
-            "No claim exists on file and required information is missing to proceed.",
-            "The claim could not be located and the request lacks the details needed to act."
-          ],
-          "examples": ["No claim on file; missing information."],
-          "keyword_rules": {
-            "positive": [
-              { "phrase": "no claim on file", "weight": 5.0 },
-              { "phrase": "missing information", "weight": 4.0 },
-              { "phrase": "no claim", "weight": 2.5 },
-              { "phrase": "unable to identify", "weight": 2.0 }
-            ],
-            "negative": [],
-            "decisive": [
-              { "all_of": ["no claim on file"] },
-              { "all_of": ["missing information"] }
-            ]
-          }
-        }
-      ],
-
-      "fields": [
-        {
-          "name": "claim_id",
-          "display_name": "Claim ID",
-          "required": true,
-          "pattern_ref": "claim_id",
-          "require_label": true,
-          "label_aliases": ["claim id", "claim number", "claim no", "claim #", "claim"],
-          "normalizer": "upper_alnum"
-        },
-        {
-          "name": "date_of_service",
-          "display_name": "DOS (Date of Service)",
-          "required": false,
-          "pattern_ref": "us_date",
-          "require_label": true,
-          "label_aliases": ["date of service", "service date", "dos"],
-          "normalizer": "date_iso"
-        },
-        {
-          "name": "patient_account",
-          "display_name": "Patient Account",
-          "required": false,
-          "pattern_ref": "patient_account",
-          "require_label": true,
-          "label_aliases": ["patient account", "patient acct", "account number", "acct #", "account"],
-          "normalizer": "upper_alnum"
-        },
-        {
-          "name": "provider_tin",
-          "display_name": "Prov TIN",
-          "required": false,
-          "pattern_ref": "provider_tin",
-          "require_label": true,
-          "label_aliases": ["provider tin", "prov tin", "tax id", "tin", "ein"],
-          "normalizer": "digits"
-        },
-        {
-          "name": "expected_amount",
-          "display_name": "Input - Expected Amount",
-          "required": false,
-          "pattern_ref": "currency_amount",
-          "require_label": false,
-          "label_aliases": ["expected amount", "input - expected amount", "expected", "billed amount", "charge amount", "amount"],
-          "normalizer": "money"
-        },
-        {
-          "name": "date_of_injury",
-          "display_name": "DOI (Date of Injury)",
-          "required": false,
-          "pattern_ref": "us_date",
-          "require_label": true,
-          "label_aliases": ["date of injury", "injury date", "doi"],
-          "normalizer": "date_iso"
-        },
-        {
-          "name": "date_of_birth",
-          "display_name": "DOB (Date of Birth)",
-          "required": false,
-          "pattern_ref": "us_date",
-          "require_label": true,
-          "label_aliases": ["date of birth", "birth date", "dob"],
-          "normalizer": "date_iso"
-        }
-      ]
-    },
-
-    {
-      "id": "claim_information",
-      "display_name": "Claim Information",
-      "enabled": true,
-      "draft": false,
-      "priority": 20,
-      "description_internal": "Sender needs claim-level information rather than a bill outcome - most commonly the claim number itself.",
-
-      "prototypes": [
-        "The sender is asking for the claim number associated with a patient or date of injury.",
-        "A provider needs the claim identifier before they can submit or resubmit a bill.",
-        "Request for claim-level details such as the claim number or the date of injury on record.",
-        "The sender does not have a claim number and is asking what it is."
-      ],
-      "examples": [
-        "Can you provide the claim number for this patient, DOI 01/09/2026?",
-        "We need the claim number before we can bill. Patient account ACCT-99213.",
-        "Requesting the claim ID on file for this date of injury."
-      ],
-      "keyword_rules": {
-        "positive": [
-          { "phrase": "claim number request", "weight": 5.0 },
-          { "phrase": "need the claim number", "weight": 4.0 },
-          { "phrase": "provide the claim number", "weight": 4.0 },
-          { "phrase": "requesting the claim", "weight": 3.5 },
-          { "phrase": "what is the claim number", "weight": 4.0 },
-          { "phrase": "claim number", "weight": 1.5 },
-          { "phrase": "date of injury", "weight": 1.2 }
-        ],
-        "negative": [
-          { "phrase": "bill status", "weight": 3.0 },
-          { "phrase": "completed processing", "weight": 3.0 },
-          { "phrase": "bill on file", "weight": 2.5 },
-          { "phrase": "no claim on file", "weight": 4.0 },
-          { "phrase": "missing information", "weight": 3.0 },
-          { "phrase": "denied", "weight": 2.0 }
-        ],
-        "decisive": [
-          { "all_of": ["claim number request"] },
-          { "all_of": ["need the claim number"] },
-          { "all_of": ["provide the claim number"] }
-        ]
-      },
-      "structural_gate": {
-        "require_any_pattern": [],
-        "penalty_if_absent": 0.0
-      },
-
-      "reasons": [
-        {
-          "id": "claim_number_request",
-          "display_name": "Claim number request",
-          "prototypes": [
-            "The sender is asking to be given the claim number.",
-            "Request to look up and return the claim identifier for a patient."
-          ],
-          "examples": ["Claim number request."],
-          "keyword_rules": {
-            "positive": [
-              { "phrase": "claim number request", "weight": 5.0 },
-              { "phrase": "claim number", "weight": 2.5 },
-              { "phrase": "claim id", "weight": 2.5 }
-            ],
-            "negative": [],
-            "decisive": [{ "all_of": ["claim number"] }]
-          }
-        }
-      ],
-
-      "fields": [
-        {
-          "name": "claim_id",
-          "display_name": "Claim ID",
-          "required": false,
-          "pattern_ref": "claim_id",
-          "require_label": true,
-          "label_aliases": ["claim id", "claim number", "claim no", "claim #", "claim"],
-          "normalizer": "upper_alnum"
-        },
-        {
-          "name": "date_of_service",
-          "display_name": "DOS (Date of Service)",
-          "required": false,
-          "pattern_ref": "us_date",
-          "require_label": true,
-          "label_aliases": ["date of service", "service date", "dos"],
-          "normalizer": "date_iso"
-        },
-        {
-          "name": "patient_account",
-          "display_name": "Patient Account",
-          "required": false,
-          "pattern_ref": "patient_account",
-          "require_label": true,
-          "label_aliases": ["patient account", "patient acct", "account number", "acct #", "account"],
-          "normalizer": "upper_alnum"
-        },
-        {
-          "name": "provider_tin",
-          "display_name": "Prov TIN",
-          "required": false,
-          "pattern_ref": "provider_tin",
-          "require_label": true,
-          "label_aliases": ["provider tin", "prov tin", "tax id", "tin", "ein"],
-          "normalizer": "digits"
-        },
-        {
-          "name": "expected_amount",
-          "display_name": "Input - Expected Amount",
-          "required": false,
-          "pattern_ref": "currency_amount",
-          "require_label": false,
-          "label_aliases": ["expected amount", "input - expected amount", "expected", "billed amount", "charge amount", "amount"],
-          "normalizer": "money"
-        },
-        {
-          "name": "date_of_injury",
-          "display_name": "DOI (Date of Injury)",
-          "required": false,
-          "pattern_ref": "us_date",
-          "require_label": true,
-          "label_aliases": ["date of injury", "injury date", "doi"],
-          "normalizer": "date_iso"
-        },
-        {
-          "name": "date_of_birth",
-          "display_name": "DOB (Date of Birth)",
-          "required": false,
-          "pattern_ref": "us_date",
-          "require_label": true,
-          "label_aliases": ["date of birth", "birth date", "dob"],
-          "normalizer": "date_iso"
-        }
-      ]
-    }
+  "embedding_temperature": 0.05,
+  "evidence_saturation_k": 4,
+  "search_quoted_history": true,
+  "history_decay": 0.9,
+  "segment_weights": {
+   "subject": 0.9,
+   "newest_body": 1.0,
+   "signature": 0.3,
+   "quoted_history": 0.55
+  }
+ },
+ "background_class": {
+  "id": "__other__",
+  "display_name": "Other / not a tracked concern",
+  "prototypes": [
+   "Thanks, received. I will get back to you shortly.",
+   "Please see the attached document for your records.",
+   "Scheduling a meeting to discuss this next week.",
+   "I am out of the office and will return on Monday.",
+   "Automated notification: your request has been processed.",
+   "Acknowledging receipt of your message below."
   ]
+ },
+ "_SHARED_FIELDS_NOTE": "DOS, DOI and DOB all resolve to the us_date pattern, and claim_id / patient_account / provider_tin all match digit runs. Every one of them sets require_label:true - without it the first date in the body would be assigned to all three date fields. See pipeline SP-1.1-38.",
+ "concerns": [
+  {
+   "id": "bill_status",
+   "display_name": "Bill Status",
+   "enabled": true,
+   "draft": false,
+   "priority": 10,
+   "description_internal": "Sender is asking about the status or disposition of a submitted bill on a claim - whether it processed, was denied, or cannot be located.",
+   "prototypes": [
+    "The sender is asking for the current status of a bill submitted on a workers compensation claim.",
+    "A provider wants to know whether a submitted bill has finished processing and what the outcome was.",
+    "Follow up asking why a bill was denied or reduced after processing.",
+    "The sender cannot find a submitted bill in the system and is asking whether it was received.",
+    "Request for an update on where a bill stands for a given date of service."
+   ],
+   "examples": [
+    "Can you check the status of the bill for claim WC1234567, DOS 03/14/2026?",
+    "Following up on this bill - has it completed processing yet?",
+    "We never received a response on this bill. Was it ever received on file?",
+    "Please advise the disposition of the charge submitted for this claim."
+   ],
+   "keyword_rules": {
+    "positive": [
+     {
+      "phrase": "bill status",
+      "weight": 3.5
+     },
+     {
+      "phrase": "status of the bill",
+      "weight": 3.5
+     },
+     {
+      "phrase": "status of this bill",
+      "weight": 3.5
+     },
+     {
+      "phrase": "bill on file",
+      "weight": 3.0
+     },
+     {
+      "phrase": "completed processing",
+      "weight": 3.0
+     },
+     {
+      "phrase": "denied",
+      "weight": 1.5
+     },
+     {
+      "phrase": "disposition",
+      "weight": 1.5
+     },
+     {
+      "phrase": "date of service",
+      "weight": 1.0
+     },
+     {
+      "phrase": "follow up",
+      "weight": 0.8
+     },
+     {
+      "phrase": "bill",
+      "weight": 0.6
+     },
+     {
+      "phrase": "bill payment status",
+      "weight": 3.5
+     },
+     {
+      "phrase": "status of bill",
+      "weight": 3.5
+     },
+     {
+      "phrase": "status of the following bill",
+      "weight": 3.5
+     },
+     {
+      "phrase": "status of the attached appeal",
+      "weight": 3.0
+     },
+     {
+      "phrase": "payment status",
+      "weight": 3.0
+     },
+     {
+      "phrase": "claim status request",
+      "weight": 3.0
+     },
+     {
+      "phrase": "claim status",
+      "weight": 2.5
+     },
+     {
+      "phrase": "provide the status",
+      "weight": 2.2
+     },
+     {
+      "phrase": "provide status",
+      "weight": 2.2
+     },
+     {
+      "phrase": "status update",
+      "weight": 2.0
+     },
+     {
+      "phrase": "unpaid bill",
+      "weight": 2.0
+     },
+     {
+      "phrase": "date of receipt",
+      "weight": 1.8
+     },
+     {
+      "phrase": "explanation of review",
+      "weight": 1.5
+     },
+     {
+      "phrase": "was received",
+      "weight": 1.2
+     },
+     {
+      "phrase": "eob",
+      "weight": 1.0
+     },
+     {
+      "phrase": "check number",
+      "weight": 0.8
+     },
+     {
+      "phrase": "copy of the eob",
+      "weight": 2.5
+     },
+     {
+      "phrase": "provide us with a copy",
+      "weight": 2.0
+     },
+     {
+      "phrase": "most recent eob",
+      "weight": 2.0
+     },
+     {
+      "phrase": "payment information",
+      "weight": 2.0
+     }
+    ],
+    "negative": [
+     {
+      "phrase": "claim number request",
+      "weight": 3.0
+     },
+     {
+      "phrase": "need a claim number",
+      "weight": 3.0
+     },
+     {
+      "phrase": "provide a claim number",
+      "weight": 3.0
+     },
+     {
+      "phrase": "provide the claim number",
+      "weight": 3.0
+     },
+     {
+      "phrase": "what is the claim number",
+      "weight": 3.0
+     }
+    ],
+    "decisive": [
+     {
+      "all_of": [
+       "bill status"
+      ]
+     },
+     {
+      "all_of": [
+       "status of the bill"
+      ]
+     },
+     {
+      "all_of": [
+       "bill on file"
+      ]
+     },
+     {
+      "all_of": [
+       "bill payment status"
+      ]
+     },
+     {
+      "all_of": [
+       "status of bill"
+      ]
+     },
+     {
+      "all_of": [
+       "claim status request"
+      ]
+     },
+     {
+      "all_of": [
+       "status of the attached appeal"
+      ]
+     }
+    ]
+   },
+   "structural_gate": {
+    "require_any_pattern": [
+     "claim_id"
+    ],
+    "penalty_if_absent": 0.2
+   },
+   "reasons": [
+    {
+     "id": "completed_processing",
+     "display_name": "Completed processing",
+     "prototypes": [
+      "The bill finished processing and an outcome was issued.",
+      "Processing is complete on this bill and payment was determined."
+     ],
+     "examples": [
+      "This bill has completed processing."
+     ],
+     "keyword_rules": {
+      "positive": [
+       {
+        "phrase": "completed processing",
+        "weight": 4.0
+       },
+       {
+        "phrase": "finished processing",
+        "weight": 3.0
+       },
+       {
+        "phrase": "processed",
+        "weight": 1.5
+       }
+      ],
+      "negative": [
+       {
+        "phrase": "denied",
+        "weight": 3.0
+       }
+      ],
+      "decisive": []
+     }
+    },
+    {
+     "id": "completed_processing_denied",
+     "display_name": "Completed processing and denied",
+     "prototypes": [
+      "The bill finished processing and the charge was denied.",
+      "Processing completed with a denial on the submitted charge."
+     ],
+     "examples": [
+      "Completed processing and denied."
+     ],
+     "keyword_rules": {
+      "positive": [
+       {
+        "phrase": "denied",
+        "weight": 3.5
+       },
+       {
+        "phrase": "denial",
+        "weight": 3.0
+       },
+       {
+        "phrase": "completed processing and denied",
+        "weight": 5.0
+       }
+      ],
+      "negative": [],
+      "decisive": [
+       {
+        "all_of": [
+         "completed processing",
+         "denied"
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "not_a_bill_on_file",
+     "display_name": "Not a bill on file",
+     "prototypes": [
+      "No bill matching this claim and date of service exists in the system.",
+      "The submitted bill was never received and is not on file."
+     ],
+     "examples": [
+      "Not a bill on file for this claim."
+     ],
+     "keyword_rules": {
+      "positive": [
+       {
+        "phrase": "not a bill on file",
+        "weight": 5.0
+       },
+       {
+        "phrase": "no bill on file",
+        "weight": 4.5
+       },
+       {
+        "phrase": "not on file",
+        "weight": 3.0
+       },
+       {
+        "phrase": "never received",
+        "weight": 2.0
+       },
+       {
+        "phrase": "cannot locate",
+        "weight": 2.0
+       }
+      ],
+      "negative": [],
+      "decisive": [
+       {
+        "all_of": [
+         "not a bill on file"
+        ]
+       },
+       {
+        "all_of": [
+         "no bill on file"
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "no_claim_on_file_missing_information",
+     "display_name": "No claim on file; Missing Information",
+     "prototypes": [
+      "No claim exists on file and required information is missing to proceed.",
+      "The claim could not be located and the request lacks the details needed to act."
+     ],
+     "examples": [
+      "No claim on file; missing information."
+     ],
+     "keyword_rules": {
+      "positive": [
+       {
+        "phrase": "no claim on file",
+        "weight": 5.0
+       },
+       {
+        "phrase": "missing information",
+        "weight": 4.0
+       },
+       {
+        "phrase": "no claim",
+        "weight": 2.5
+       },
+       {
+        "phrase": "unable to identify",
+        "weight": 2.0
+       }
+      ],
+      "negative": [],
+      "decisive": [
+       {
+        "all_of": [
+         "no claim on file"
+        ]
+       },
+       {
+        "all_of": [
+         "missing information"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "fields": [
+    {
+     "name": "claim_id",
+     "display_name": "Claim ID",
+     "required": true,
+     "pattern_ref": "claim_id",
+     "require_label": true,
+     "label_aliases": [
+      "claim id",
+      "claim number",
+      "claim no",
+      "claim #",
+      "claim",
+      "claim#",
+      "clm",
+      "your claim #"
+     ],
+     "normalizer": "upper_alnum",
+     "reject_prefix": [
+      "bill/",
+      "our bill",
+      "ref ",
+      "ref#",
+      "ref:",
+      "bill "
+     ]
+    },
+    {
+     "name": "date_of_service",
+     "display_name": "DOS (Date of Service)",
+     "required": true,
+     "pattern_ref": "us_date",
+     "require_label": true,
+     "label_aliases": [
+      "date of service",
+      "service date",
+      "dos",
+      "dates of service",
+      "date service",
+      "svc date"
+     ],
+     "normalizer": "date_iso"
+    },
+    {
+     "name": "patient_account",
+     "display_name": "Patient Account",
+     "required": false,
+     "pattern_ref": "patient_account",
+     "require_label": true,
+     "label_aliases": [
+      "patient account",
+      "patient acct",
+      "account number",
+      "acct #",
+      "account",
+      "patient account#",
+      "account ref#",
+      "account ref",
+      "acc.#",
+      "acct#",
+      "acct number"
+     ],
+     "normalizer": "upper_alnum"
+    },
+    {
+     "name": "provider_tin",
+     "display_name": "Prov TIN",
+     "required": false,
+     "pattern_ref": "provider_tin",
+     "require_label": true,
+     "label_aliases": [
+      "provider tin",
+      "prov tin",
+      "tax id",
+      "tin",
+      "ein",
+      "taxid",
+      "tax id#",
+      "tax i.d",
+      "federal tax id"
+     ],
+     "normalizer": "digits"
+    },
+    {
+     "name": "expected_amount",
+     "display_name": "Input - Expected Amount",
+     "required": true,
+     "pattern_ref": "currency_amount",
+     "require_label": true,
+     "label_aliases": [
+      "expected amount",
+      "input - expected amount",
+      "expected",
+      "billed amount",
+      "charge amount",
+      "amount",
+      "total charge amount",
+      "total charge",
+      "charged amount",
+      "billing amount",
+      "appeal amount",
+      "amount billed",
+      "bill amount",
+      "billed amt",
+      "billed",
+      "tc",
+      "charge",
+      "charge was",
+      "charge of",
+      "amount of"
+     ],
+     "normalizer": "money",
+     "reject_prefix": [
+      "paid ",
+      "check ",
+      "payment "
+     ],
+     "exclude_pattern_ref": "us_date"
+    },
+    {
+     "name": "date_of_injury",
+     "display_name": "DOI (Date of Injury)",
+     "required": false,
+     "pattern_ref": "us_date",
+     "require_label": true,
+     "label_aliases": [
+      "date of injury",
+      "injury date",
+      "doi",
+      "date injury"
+     ],
+     "normalizer": "date_iso"
+    },
+    {
+     "name": "date_of_birth",
+     "display_name": "DOB (Date of Birth)",
+     "required": false,
+     "pattern_ref": "us_date",
+     "require_label": true,
+     "label_aliases": [
+      "date of birth",
+      "birth date",
+      "dob",
+      "date birth"
+     ],
+     "normalizer": "date_iso"
+    }
+   ]
+  },
+  {
+   "id": "claim_information",
+   "display_name": "Claim Information",
+   "enabled": true,
+   "draft": false,
+   "priority": 20,
+   "description_internal": "Sender needs claim-level information rather than a bill outcome - most commonly the claim number itself.",
+   "prototypes": [
+    "The sender is asking for the claim number associated with a patient or date of injury.",
+    "A provider needs the claim identifier before they can submit or resubmit a bill.",
+    "Request for claim-level details such as the claim number or the date of injury on record.",
+    "The sender does not have a claim number and is asking what it is."
+   ],
+   "examples": [
+    "Can you provide the claim number for this patient, DOI 01/09/2026?",
+    "We need the claim number before we can bill. Patient account ACCT-99213.",
+    "Requesting the claim ID on file for this date of injury."
+   ],
+   "keyword_rules": {
+    "positive": [
+     {
+      "phrase": "claim number request",
+      "weight": 5.0
+     },
+     {
+      "phrase": "need the claim number",
+      "weight": 4.0
+     },
+     {
+      "phrase": "provide the claim number",
+      "weight": 4.0
+     },
+     {
+      "phrase": "requesting the claim",
+      "weight": 3.5
+     },
+     {
+      "phrase": "what is the claim number",
+      "weight": 4.0
+     },
+     {
+      "phrase": "claim number",
+      "weight": 0.3
+     },
+     {
+      "phrase": "date of injury",
+      "weight": 0.4
+     },
+     {
+      "phrase": "provide a claim number",
+      "weight": 4.0
+     }
+    ],
+    "negative": [
+     {
+      "phrase": "bill status",
+      "weight": 3.0
+     },
+     {
+      "phrase": "completed processing",
+      "weight": 3.0
+     },
+     {
+      "phrase": "bill on file",
+      "weight": 2.5
+     },
+     {
+      "phrase": "no claim on file",
+      "weight": 4.0
+     },
+     {
+      "phrase": "missing information",
+      "weight": 3.0
+     },
+     {
+      "phrase": "denied",
+      "weight": 2.0
+     },
+     {
+      "phrase": "claim status",
+      "weight": 2.5
+     },
+     {
+      "phrase": "payment status",
+      "weight": 2.5
+     },
+     {
+      "phrase": "status of the bill",
+      "weight": 3.0
+     },
+     {
+      "phrase": "status of bill",
+      "weight": 3.0
+     },
+     {
+      "phrase": "bill payment status",
+      "weight": 3.0
+     },
+     {
+      "phrase": "status of the attached appeal",
+      "weight": 2.5
+     }
+    ],
+    "decisive": [
+     {
+      "all_of": [
+       "claim number request"
+      ]
+     },
+     {
+      "all_of": [
+       "need the claim number"
+      ]
+     },
+     {
+      "all_of": [
+       "provide the claim number"
+      ]
+     },
+     {
+      "all_of": [
+       "provide a claim number"
+      ]
+     }
+    ]
+   },
+   "structural_gate": {
+    "require_any_pattern": [],
+    "penalty_if_absent": 0.0
+   },
+   "reasons": [
+    {
+     "id": "claim_number_request",
+     "display_name": "Claim number request",
+     "prototypes": [
+      "The sender is asking to be given the claim number.",
+      "Request to look up and return the claim identifier for a patient."
+     ],
+     "examples": [
+      "Claim number request."
+     ],
+     "keyword_rules": {
+      "positive": [
+       {
+        "phrase": "claim number request",
+        "weight": 5.0
+       },
+       {
+        "phrase": "claim number",
+        "weight": 2.5
+       },
+       {
+        "phrase": "claim id",
+        "weight": 2.5
+       }
+      ],
+      "negative": [],
+      "decisive": [
+       {
+        "all_of": [
+         "claim number"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "fields": [
+    {
+     "name": "claim_id",
+     "display_name": "Claim ID",
+     "required": false,
+     "pattern_ref": "claim_id",
+     "require_label": true,
+     "label_aliases": [
+      "claim id",
+      "claim number",
+      "claim no",
+      "claim #",
+      "claim",
+      "claim#",
+      "clm",
+      "your claim #"
+     ],
+     "normalizer": "upper_alnum",
+     "reject_prefix": [
+      "bill/",
+      "our bill",
+      "ref ",
+      "ref#",
+      "ref:",
+      "bill "
+     ]
+    },
+    {
+     "name": "date_of_service",
+     "display_name": "DOS (Date of Service)",
+     "required": false,
+     "pattern_ref": "us_date",
+     "require_label": true,
+     "label_aliases": [
+      "date of service",
+      "service date",
+      "dos",
+      "dates of service",
+      "date service",
+      "svc date"
+     ],
+     "normalizer": "date_iso"
+    },
+    {
+     "name": "patient_account",
+     "display_name": "Patient Account",
+     "required": false,
+     "pattern_ref": "patient_account",
+     "require_label": true,
+     "label_aliases": [
+      "patient account",
+      "patient acct",
+      "account number",
+      "acct #",
+      "account",
+      "patient account#",
+      "account ref#",
+      "account ref",
+      "acc.#",
+      "acct#",
+      "acct number"
+     ],
+     "normalizer": "upper_alnum"
+    },
+    {
+     "name": "provider_tin",
+     "display_name": "Prov TIN",
+     "required": false,
+     "pattern_ref": "provider_tin",
+     "require_label": true,
+     "label_aliases": [
+      "provider tin",
+      "prov tin",
+      "tax id",
+      "tin",
+      "ein",
+      "taxid",
+      "tax id#",
+      "tax i.d",
+      "federal tax id"
+     ],
+     "normalizer": "digits"
+    },
+    {
+     "name": "expected_amount",
+     "display_name": "Input - Expected Amount",
+     "required": false,
+     "pattern_ref": "currency_amount",
+     "require_label": true,
+     "label_aliases": [
+      "expected amount",
+      "input - expected amount",
+      "expected",
+      "billed amount",
+      "charge amount",
+      "amount",
+      "total charge amount",
+      "total charge",
+      "charged amount",
+      "billing amount",
+      "appeal amount",
+      "amount billed",
+      "bill amount",
+      "billed amt",
+      "billed",
+      "tc",
+      "charge",
+      "charge was",
+      "charge of",
+      "amount of"
+     ],
+     "normalizer": "money",
+     "reject_prefix": [
+      "paid ",
+      "check ",
+      "payment "
+     ],
+     "exclude_pattern_ref": "us_date"
+    },
+    {
+     "name": "date_of_injury",
+     "display_name": "DOI (Date of Injury)",
+     "required": false,
+     "pattern_ref": "us_date",
+     "require_label": true,
+     "label_aliases": [
+      "date of injury",
+      "injury date",
+      "doi",
+      "date injury"
+     ],
+     "normalizer": "date_iso"
+    },
+    {
+     "name": "date_of_birth",
+     "display_name": "DOB (Date of Birth)",
+     "required": false,
+     "pattern_ref": "us_date",
+     "require_label": true,
+     "label_aliases": [
+      "date of birth",
+      "birth date",
+      "dob",
+      "date birth"
+     ],
+     "normalizer": "date_iso"
+    }
+   ]
+  }
+ ]
 }

@@ -4,9 +4,10 @@ Tk's defaults look like 1998, so every widget that shows is restyled. ttk's
 'clam' engine is used as the base because it is the only built-in one that
 honours background colour on most widget elements.
 
-Every pixel measurement here is 20% below the original (SP-1.1-53). Font point
-sizes are unchanged - `app.main()` drops the Tk scaling factor instead, which
-shrinks all text by the same 20% in one place.
+Font point sizes were raised ~20% (SP-1.1-58) because the shrunk-down window
+left the body text hard to read. Sizes are set here rather than through the Tk
+scaling factor so widget padding stays put and only the type grows; `app.py`
+widens the window to match.
 """
 
 from __future__ import annotations
@@ -69,14 +70,14 @@ class Fonts:
         ui, mono = pick_family(root)
         self.family = ui
         self.mono_family = mono
-        self.body = tkfont.Font(root=root, family=ui, size=10)
-        self.body_bold = tkfont.Font(root=root, family=ui, size=10, weight="bold")
-        self.small = tkfont.Font(root=root, family=ui, size=9)
-        self.tiny = tkfont.Font(root=root, family=ui, size=8)
-        self.h1 = tkfont.Font(root=root, family=ui, size=15, weight="bold")
-        self.h2 = tkfont.Font(root=root, family=ui, size=11, weight="bold")
-        self.value = tkfont.Font(root=root, family=mono, size=10)
-        self.mono = tkfont.Font(root=root, family=mono, size=9)
+        self.body = tkfont.Font(root=root, family=ui, size=12)
+        self.body_bold = tkfont.Font(root=root, family=ui, size=12, weight="bold")
+        self.small = tkfont.Font(root=root, family=ui, size=11)
+        self.tiny = tkfont.Font(root=root, family=ui, size=10)
+        self.h1 = tkfont.Font(root=root, family=ui, size=18, weight="bold")
+        self.h2 = tkfont.Font(root=root, family=ui, size=13, weight="bold")
+        self.value = tkfont.Font(root=root, family=mono, size=12)
+        self.mono = tkfont.Font(root=root, family=mono, size=11)
 
 
 def apply_theme(root: tk.Tk) -> Fonts:
@@ -160,7 +161,7 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Dark.TNotebook.Tab",
         background=BG, foreground=TEXT_FAINT, font=fonts.small,
-        padding=(13, 7), borderwidth=0,
+        padding=(15, 8), borderwidth=0,
     )
     style.map(
         "Dark.TNotebook.Tab",
@@ -172,12 +173,12 @@ def apply_theme(root: tk.Tk) -> Fonts:
     style.configure(
         "Dark.Treeview",
         background=ELEVATED, fieldbackground=ELEVATED, foreground=TEXT,
-        borderwidth=0, rowheight=22, font=fonts.body,
+        borderwidth=0, rowheight=28, font=fonts.body,
     )
     style.configure(
         "Dark.Treeview.Heading",
         background=SURFACE, foreground=TEXT_DIM, font=fonts.tiny,
-        relief="flat", padding=(6, 6),
+        relief="flat", padding=(7, 7),
     )
     style.map(
         "Dark.Treeview.Heading",
@@ -231,7 +232,7 @@ class Pill(tk.Canvas):
     """Rounded status chip. Tk has no rounded rectangle, so it is drawn."""
 
     def __init__(self, parent: tk.Misc, fonts: Fonts, *, bg: str = ELEVATED) -> None:
-        super().__init__(parent, height=19, width=104, bg=bg,
+        super().__init__(parent, height=23, width=124, bg=bg,
                          highlightthickness=0, borderwidth=0)
         self._fonts = fonts
         self._bg = bg
@@ -239,9 +240,9 @@ class Pill(tk.Canvas):
     def set(self, text: str, color: str) -> None:
         self.delete("all")
         f = self._fonts.tiny
-        pad = 9
+        pad = 10
         w = f.measure(text) + pad * 2
-        h = 18
+        h = 22
         self.configure(width=w, height=h)
         r = h // 2
         # Rounded rect from two arcs plus a joining rectangle.
