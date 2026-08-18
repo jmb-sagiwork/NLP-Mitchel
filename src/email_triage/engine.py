@@ -18,7 +18,7 @@ from typing import Iterable, Mapping
 
 from . import __version__ as ENGINE_VERSION
 from .config import Config, load_config
-from .extract import extract_fields
+from .extract import build_line_items, extract_fields
 from .layers import (
     EmbeddingLayer,
     find_pattern_hits,
@@ -190,6 +190,7 @@ class TriageEngine:
 
         # Extraction runs after classification, then feeds back into status.
         fields, missing, ambiguous = extract_fields(concern, prepared, cfg)
+        line_items = build_line_items(concern, prepared, cfg)
 
         status, needs_review, reason = self._decide(
             confidence=confidence,
@@ -226,6 +227,7 @@ class TriageEngine:
             reason_confidence=reason_conf,
             reason_alternatives=reason_alts,
             fields=fields,
+            line_items=line_items,
             missing_fields=missing,
             ambiguous_fields=ambiguous,
             alternatives=tuple(

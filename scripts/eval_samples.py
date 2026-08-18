@@ -6,9 +6,10 @@ the real `TriageEngine` over the same 15 emails and reports where it agrees.
 Value comparison is normalized on both sides - the engine emits `2026-07-09`
 and `2288.60` where the sheet holds whatever the labeller wrote - so the
 comparison is about whether the same VALUE was found, not the same formatting.
-A ground-truth cell holding several values ("9/14/2026 | 9/28/2026") counts as
-matched when the engine finds any one of them; multi-value extraction is a
-known gap, tracked in SAMPLE_RULES.md Finding 5.
+A ground-truth cell holding several values ("11/21/2041 | 11/24/2041") is scored
+as a SET against `FieldValue.values`: every value must be found and no extra
+one invented. Partial credit is reported separately as PARTIAL, so a field that
+finds 2 of 5 dates is not counted the same as one that finds all 5.
 
     py -3.14 scripts/eval_samples.py
     py -3.14 scripts/eval_samples.py --verbose    # per-row detail
@@ -58,7 +59,7 @@ def main() -> int:
 
     concern_ok = 0
     rows = 0
-    per_field = {name: [0, 0, 0] for name, _ in COLUMNS.values()}  # hit, miss, wrong
+    per_field = {name: [0, 0, 0, 0] for name, _ in COLUMNS.values()}  # hit, miss, wrong, partial
     review = 0
 
     print(f"engine {'3 layers' if engine.embeddings_active else '2 layers (no model)'}"
@@ -88,9 +89,13 @@ def main() -> int:
                     per_field[fname][2] += 1
                     detail.append(f"{fname}=FALSE-POSITIVE")
                 continue
-            if got and got in want:
+            found = set(fv.values) if fv and fv.values else ({got} if got else set())
+            if found == want:
                 per_field[fname][0] += 1
-            elif got:
+            elif found and found < want:
+                per_field[fname][3] += 1
+                detail.append(f"{fname}=PARTIAL({len(found)}/{len(want)})")
+            elif found:
                 per_field[fname][2] += 1
                 detail.append(f"{fname}=WRONG")
             else:
@@ -109,10 +114,16 @@ def main() -> int:
 
     print(f"\nconcern      : {concern_ok}/{rows}")
     print(f"needs review : {review}/{rows}")
-    print(f"\n  {'field':<18} {'hit':>4} {'missed':>7} {'wrong':>6}  of truth")
-    for name, (hit, miss, wrong) in per_field.items():
-        total = hit + miss + wrong
-        print(f"  {name:<18} {hit:>4} {miss:>7} {wrong:>6}  {total:>3}")
+    print(
+        f"\n  {'field':<18} {'exact':>6} {'partial':>8}"
+        f" {'missed':>7} {'wrong':>6}  of truth"
+    )
+    for name, (hit, miss, wrong, partial) in per_field.items():
+        total = hit + partial + miss + wrong
+        print(
+            f"  {name:<18} {hit:>6} {partial:>8}"
+            f" {miss:>7} {wrong:>6}  {total:>3}"
+        )
     return 0
 
 

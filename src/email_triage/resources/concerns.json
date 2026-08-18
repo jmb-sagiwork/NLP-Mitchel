@@ -1,5 +1,5 @@
 {
- "config_version": "0.3.2",
+ "config_version": "0.4.0",
  "schema_version": "1.1.0",
  "updated": "2026-08-19",
  "_TAXONOMY_SOURCE": "Concerns, reasons and the seven extraction fields come from the user's operational list. Two levels: CONCERN is what the item is about (Bill Status, Claim Information); REASON is the sub-classification within it. 0.3.0 applied the rules derived from 15 real inbound emails - see SAMPLE_RULES.md and samples.xlsx column M.",
@@ -68,13 +68,22 @@
     "A provider wants to know whether a submitted bill has finished processing and what the outcome was.",
     "Follow up asking why a bill was denied or reduced after processing.",
     "The sender cannot find a submitted bill in the system and is asking whether it was received.",
-    "Request for an update on where a bill stands for a given date of service."
+    "Request for an update on where a bill stands for a given date of service.",
+    "The sender wants a copy of the explanation of benefits or explanation of review for a bill that was already submitted.",
+    "Follow up asking whether an appeal or reconsideration that was mailed has been received and processed.",
+    "A provider is asking when payment will be issued and for the check number, check date and check amount.",
+    "Request to confirm that a submitted bill or claim was received on file, and to be told the date it was received."
    ],
    "examples": [
     "Can you check the status of the bill for claim WC1234567, DOS 03/14/2026?",
     "Following up on this bill - has it completed processing yet?",
     "We never received a response on this bill. Was it ever received on file?",
-    "Please advise the disposition of the charge submitted for this claim."
+    "Please advise the disposition of the charge submitted for this claim.",
+    "Can you please provide us with a copy of the EOB for the date of service below?",
+    "Please confirm that the following appeal was received.",
+    "Can you provide status of the attached appeal that was mailed last month?",
+    "When can we anticipate payment? If payment has been issued please provide the check number.",
+    "Please provide the date of receipt and a status update for the bill listed below."
    ],
    "keyword_rules": {
     "positive": [
@@ -221,7 +230,7 @@
       "weight": 3.0
      }
     ],
-    "decisive": [
+     "decisive": [
      {
       "all_of": [
        "bill status"
@@ -252,12 +261,17 @@
        "claim status request"
       ]
      },
-     {
-      "all_of": [
-       "status of the attached appeal"
-      ]
-     }
-    ]
+      {
+       "all_of": [
+        "status of the attached appeal"
+       ]
+      },
+      {
+       "all_of": [
+        "copy of the eob"
+       ]
+      }
+     ]
    },
    "structural_gate": {
     "require_any_pattern": [
@@ -470,7 +484,8 @@
       "date service",
       "svc date"
      ],
-     "normalizer": "date_iso"
+     "normalizer": "date_iso",
+     "multi_value": true
     },
     {
      "name": "patient_account",
@@ -546,7 +561,8 @@
       "check ",
       "payment "
      ],
-     "exclude_pattern_ref": "us_date"
+     "exclude_pattern_ref": "us_date",
+     "multi_value": true
     },
     {
      "name": "date_of_injury",
@@ -576,6 +592,10 @@
      ],
      "normalizer": "date_iso"
     }
+   ],
+   "line_item_fields": [
+    "date_of_service",
+    "expected_amount"
    ]
   },
   {
@@ -588,13 +608,15 @@
    "prototypes": [
     "The sender is asking for the claim number associated with a patient or date of injury.",
     "A provider needs the claim identifier before they can submit or resubmit a bill.",
-    "Request for claim-level details such as the claim number or the date of injury on record.",
-    "The sender does not have a claim number and is asking what it is."
+    "The sender does not have a claim number and is asking what it is.",
+    "The sender has no claim number at all and is asking to be told what it is for a named patient.",
+    "A new injury has been reported and the provider is asking which claim number to bill against."
    ],
    "examples": [
     "Can you provide the claim number for this patient, DOI 01/09/2026?",
     "We need the claim number before we can bill. Patient account ACCT-99213.",
-    "Requesting the claim ID on file for this date of injury."
+    "Requesting the claim ID on file for this date of injury.",
+    "If able, please provide a claim number for the following patient."
    ],
    "keyword_rules": {
     "positive": [
@@ -786,7 +808,8 @@
       "date service",
       "svc date"
      ],
-     "normalizer": "date_iso"
+     "normalizer": "date_iso",
+     "multi_value": true
     },
     {
      "name": "patient_account",
@@ -862,7 +885,8 @@
       "check ",
       "payment "
      ],
-     "exclude_pattern_ref": "us_date"
+     "exclude_pattern_ref": "us_date",
+     "multi_value": true
     },
     {
      "name": "date_of_injury",
@@ -894,5 +918,6 @@
     }
    ]
   }
- ]
+ ],
+ "_MULTI_VALUE_NOTE": "date_of_service and expected_amount are multi_value: one email routinely covers several dates of service, each with its own billed amount. Several values in those two fields is the normal case and is NOT flagged as ambiguous. When a date and an amount appear on the same line the pairing is kept in result.line_items, because which amount belongs to which date is the part an agent cannot reconstruct from two flat lists."
 }

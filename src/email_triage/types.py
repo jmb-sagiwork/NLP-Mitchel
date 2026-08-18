@@ -38,11 +38,17 @@ class FieldValue:
     required: bool = False
     from_history: bool = False
     candidates: tuple[str, ...] = ()
+    # Every distinct value found for this field, in document order. One email
+    # routinely covers several dates of service and several billed amounts, so
+    # collapsing to one would discard most of what the sender asked about.
+    # `value` stays the first, so single-value callers keep working.
+    values: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["span"] = list(self.span) if self.span else None
         d["candidates"] = list(self.candidates)
+        d["values"] = list(self.values)
         return d
 
 
@@ -65,6 +71,22 @@ class LayerScore:
         d["decisive_hits"] = list(self.decisive_hits)
         d["keyword_hits"] = list(self.keyword_hits)
         return d
+
+
+@dataclass(frozen=True)
+class LineItem:
+    """One row of a multi-line bill: a date of service and what it was billed.
+
+    Emails here arrive as "4/21/26 billed amount $527" repeated per line, or as
+    a DOS / AMOUNT BILLED table. Reporting five dates and five amounts as two
+    flat lists loses the pairing, and the pairing is the part an agent needs.
+    """
+
+    fields: dict[str, str] = field(default_factory=dict)
+    line: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"fields": dict(self.fields), "line": self.line}
 
 
 @dataclass(frozen=True)
@@ -102,6 +124,9 @@ class TriageResult:
     reason_confidence: float = 0.0
     reason_alternatives: tuple[tuple[str, float], ...] = ()
     fields: dict[str, FieldValue] = field(default_factory=dict)
+    # Populated only when the concern declares line_item_fields and the email
+    # actually pairs them on one line. Empty is the normal single-bill case.
+    line_items: tuple[LineItem, ...] = ()
     missing_fields: tuple[str, ...] = ()
     ambiguous_fields: tuple[str, ...] = ()
     alternatives: tuple[tuple[str, float], ...] = ()
@@ -139,6 +164,7 @@ class TriageResult:
             ],
             "fields": {k: v.to_dict() for k, v in self.fields.items()},
             "values": self.values,
+            "line_items": [li.to_dict() for li in self.line_items],
             "missing_fields": list(self.missing_fields),
             "ambiguous_fields": list(self.ambiguous_fields),
             "alternatives": [[c, round(s, 4)] for c, s in self.alternatives],

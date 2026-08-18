@@ -80,6 +80,9 @@ class CompiledField:
     # not the carrier claim id, and both turn up beside a real "Claim number"
     # in the same email (SP-1.1-60).
     reject_prefix: tuple[str, ...] = ()
+    # Collect every distinct value instead of only the best one. Set on the
+    # fields that legitimately repeat within one email (SP-1.1-61).
+    multi_value: bool = False
     # Name of another library pattern whose matches this field must not claim.
     # Dates and money overlap once us_date accepts dots: "03.11.1994" offers
     # "03.11" to currency_amount. The date wins and the money match is dropped.
@@ -132,6 +135,10 @@ class CompiledConcern:
     gate_penalty: float
     fields: tuple[CompiledField, ...]
     reasons: tuple[CompiledReason, ...] = ()
+    # Field names that repeat together on one line ("4/21/26 billed $527").
+    # Declaring them lets extraction keep the pairing instead of flattening it
+    # into two independent lists (SP-1.1-61).
+    line_item_fields: tuple[str, ...] = ()
 
     @property
     def evidence_count(self) -> int:
@@ -274,6 +281,7 @@ def _compile_field(
                 f"'{exclude_ref}' is not in patterns.library.json"
             )
         exclude_pattern = patterns[exclude_ref]
+    multi_value = bool(spec.get("multi_value", False))
     require_label = bool(spec.get("require_label", False))
     if require_label and not aliases:
         raise ConfigError(
@@ -290,6 +298,7 @@ def _compile_field(
         require_label=require_label,
         reject_prefix=reject_prefix,
         exclude_pattern=exclude_pattern,
+        multi_value=multi_value,
     )
 
 
@@ -373,6 +382,7 @@ def _compile_concern(spec: dict[str, Any], patterns: dict[str, CompiledPattern])
         gate_patterns=gate_patterns,
         gate_penalty=float(gate.get("penalty_if_absent", 0.0)),
         fields=tuple(_compile_field(f, cid, patterns) for f in spec.get("fields", [])),
+        line_item_fields=tuple(str(f) for f in spec.get("line_item_fields", [])),
         reasons=reasons,
     )
 

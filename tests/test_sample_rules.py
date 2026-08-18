@@ -167,3 +167,50 @@ def test_a_quoted_claim_number_label_is_not_a_claim_information_signal(rules_eng
         subject="Number- 5511340-1",
     )
     assert r.concern_id == "bill_status"
+
+
+def test_eob_copy_request_overrides_embedding_similarity(engine):
+    """An explicit EOB request is bill disposition work, even when the field
+    dump resembles the claim-information prototypes to MiniLM."""
+    r = engine.classify(
+        "Can you provide us with a copy of the EOB for the date of service below?\n"
+        "Claim Number - ZX8042719-6\nDOS: 12/19/2042\nBilled Amt: $7,654.32",
+        subject="Number - ZX8042719-6",
+    )
+    assert r.concern_id == "bill_status"
+    assert r.explanation.reason == "decisive_rule"
+
+
+# --------------------------------------------------------------------------
+# repeated DOS / billed-amount tables - config 0.4.0
+# --------------------------------------------------------------------------
+
+
+def test_vertical_bill_table_keeps_all_values_and_their_pairs(rules_engine):
+    """Flattened tables put DOS, amount and notes on separate lines. A date at
+    the start of a narrative note must not become an extra date of service."""
+    r = rules_engine.classify(
+        "Bill status for Claim # ZX8042719-6.\n"
+        "DOS\n\nAMOUNT BILLED\n\nNOTES\n\n"
+        "11/21/2041\n\n$                     246.80\n\n"
+        "11/22/41 called for status; DOS 11/21/2041 remains under review.\n\n"
+        "11/24/2041\n\n$                     1,357.90\n\n"
+        "11/25/41 follow-up note without another billed line."
+    )
+    assert r.fields["date_of_service"].values == ("2041-11-21", "2041-11-24")
+    assert r.fields["expected_amount"].values == ("246.80", "1357.90")
+    assert [item.fields for item in r.line_items] == [
+        {"date_of_service": "2041-11-21", "expected_amount": "246.80"},
+        {"date_of_service": "2041-11-24", "expected_amount": "1357.90"},
+    ]
+
+
+def test_same_line_bill_rows_keep_all_values_and_their_pairs(rules_engine):
+    r = rules_engine.classify(
+        "Bill status for Claim # ZX8042719-6.\n"
+        "DOS 11/21/2041 billed amount $246.80\n"
+        "DOS 11/24/2041 billed amount $1,357.90\n"
+    )
+    assert r.fields["date_of_service"].values == ("2041-11-21", "2041-11-24")
+    assert r.fields["expected_amount"].values == ("246.80", "1357.90")
+    assert len(r.line_items) == 2

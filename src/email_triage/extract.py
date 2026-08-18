@@ -15,12 +15,18 @@ from dataclasses import dataclass
 
 from .config import CompiledConcern, CompiledField, Config
 from .textprep import PreparedText
-from .types import FieldValue, Segment
+from .types import FieldValue, LineItem, Segment
 
 # How far after a label to look for the value.
 _LABEL_WINDOW = 60
 # How far back to read when testing a label against reject_prefix.
 _PREFIX_LOOKBACK = 12
+# A label heading a LIST ("for the following dates of service?") is followed by
+# lines that each start with a value. This is how far that run may extend.
+_LIST_MAX_LINES = 12
+# Exported tables often flatten as DOS / AMOUNT / NOTES followed by one value
+# per line. Two non-value lines may therefore sit between successive values.
+_LIST_MAX_GAP = 2
 
 
 # --------------------------------------------------------------------------
@@ -135,11 +141,84 @@ def _label_spans(field: CompiledField, low: str) -> list[tuple[int, int, str]]:
     return spans
 
 
+def _list_after(field: CompiledField, text: str, start: int):
+    """Yield pattern matches from a short list or flattened table.
+
+    Email #12 in the sample set reads "for the following dates of service?"
+    and then five lines, each starting with a date and its amount. Another table
+    exports DOS / AMOUNT / NOTES as separate rows, so two neighboring columns
+    may sit between values. A match after such a gap must occupy the whole line;
+    that keeps a note beginning with a call date from becoming another DOS.
+    """
+    if field.pattern is None:
+        return
+    blocked = _blocked_spans(field, text)
+    pos = text.find("\n", start)
+    if pos == -1:
+        return
+    nonblank = 0
+    gap = 0
+    while nonblank < _LIST_MAX_LINES:
+        nl = text.find("\n", pos + 1)
+        line = text[pos + 1 : nl if nl != -1 else len(text)]
+        if not line.strip():
+            if nl == -1:
+                return
+            pos = nl
+            continue
+        nonblank += 1
+        stripped = line.lstrip()
+        offset = pos + 1 + (len(line) - len(stripped))
+        m = field.pattern.regex.match(stripped)
+        accepted = False
+        if m is not None:
+            # Consecutive list rows may carry trailing columns on the same line.
+            # Once a gap has occurred, however, only a standalone value is safe:
+            # "5/3/26 called for status" is a note timestamp, not another DOS.
+            trailing = stripped[m.end() :].strip()
+            if gap == 0 or not trailing:
+                raw = m.group(field.pattern.capture_group)
+                ms, me = m.span(field.pattern.capture_group)
+                s, e = offset + ms, offset + me
+                if not any(s < be and e > bs for bs, be in blocked):
+                    yield raw, (s, e)
+                    accepted = True
+                    gap = 0
+        if not accepted:
+            gap += 1
+            if gap > _LIST_MAX_GAP:
+                return
+        if nl == -1:
+            return
+        pos = nl
+
+
 def _blocked_spans(field: CompiledField, text: str) -> list[tuple[int, int]]:
     """Character ranges another pattern owns, which this field may not claim."""
     if field.exclude_pattern is None:
         return []
     return [span for _, span in field.exclude_pattern.finditer(text)]
+
+
+def _standalone_value(field: CompiledField, line: str) -> str | None:
+    """Return a value only when the complete trimmed line is that value."""
+    if field.pattern is None:
+        return None
+    stripped = line.strip()
+    match = field.pattern.regex.fullmatch(stripped)
+    if match is None:
+        return None
+    start, end = match.span(field.pattern.capture_group)
+    if any(start < be and end > bs for bs, be in _blocked_spans(field, stripped)):
+        return None
+    value = normalize_value(match.group(field.pattern.capture_group), field.normalizer)
+    return value or None
+
+
+def _is_standalone_label(field: CompiledField, line: str) -> bool:
+    """Whether a short table header line is exactly one configured alias."""
+    label = line.strip().lower().strip(" :-")
+    return any(label == alias.strip().lower().strip(" :-") for alias in field.label_aliases)
 
 
 def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[Candidate]:
@@ -158,9 +237,17 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
         for ls, le, alias in labels:
             window = seg.text[le : le + _LABEL_WINDOW]
             blocked = _blocked_spans(field, window)
+            taken = 0
+            line_end: int | None = None
             for raw, (ws, we) in field.pattern.finditer(window):
                 if any(ws < be and we > bs for bs, be in blocked):
                     continue
+                # A multi-value field keeps every figure on the label's own
+                # line - "Billed Amount : 246.80 AND 1357.90" is two real
+                # amounts - but stops at the newline, because the next line is
+                # a different field ("Ref #: ...") and not another amount.
+                if line_end is not None and ws > line_end:
+                    break
                 value = normalize_value(raw, field.normalizer)
                 if not value:
                     continue
@@ -177,7 +264,31 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
                     )
                 )
                 claimed.append((s, e))
-                break  # nearest match after the label wins
+                taken += 1
+                if not field.multi_value:
+                    break  # nearest match after the label wins
+                if line_end is None:
+                    nl = window.find("\n", we)
+                    line_end = len(window) if nl == -1 else nl
+
+            # A label can head a LIST rather than point at one value:
+            # "...for the following dates of service?" then a date per line.
+            if field.multi_value and taken:
+                for raw, (s, e) in _list_after(field, seg.text, le):
+                    value = normalize_value(raw, field.normalizer)
+                    if not value:
+                        continue
+                    out.append(
+                        Candidate(
+                            raw=raw,
+                            value=value,
+                            span=(seg.offset + s, seg.offset + e),
+                            segment=seg.kind,
+                            strategy=f"label_list:{alias}",
+                            score=round(seg_w * 0.68, 4),
+                        )
+                    )
+                    claimed.append((s, e))
 
         if field.require_label:
             # Shared pattern (DOS/DOI/DOB, claim_id/patient_account/TIN): an
@@ -247,10 +358,20 @@ def extract_fields(
         pool.sort(key=lambda c: (-c.score, c.span[0]))
         best = pool[0]
 
-        # Distinct competing values within delta of the winner => ambiguous.
-        distinct = [c for c in pool if c.value != best.value]
-        if distinct and (best.score - distinct[0].score) < delta:
-            ambiguous.append(f.name)
+        # Document order, de-duplicated. For a multi_value field this is the
+        # answer; for a single-value field it is only provenance.
+        ordered = sorted(pool, key=lambda c: c.span[0])
+        all_values = tuple(dict.fromkeys(c.value for c in ordered))
+
+        if f.multi_value:
+            # Several dates of service in one email is the NORMAL case here,
+            # not a contradiction to flag. Only a single-value field can be
+            # made ambiguous by competing values.
+            best = ordered[0]
+        else:
+            distinct = [c for c in pool if c.value != best.value]
+            if distinct and (best.score - distinct[0].score) < delta:
+                ambiguous.append(f.name)
 
         fields[f.name] = FieldValue(
             name=f.name,
@@ -264,6 +385,111 @@ def extract_fields(
             required=f.required,
             from_history=from_history,
             candidates=tuple(dict.fromkeys(c.value for c in pool))[:5],
+            values=all_values if f.multi_value else (best.value,),
         )
 
     return fields, tuple(missing), tuple(ambiguous)
+
+
+def build_line_items(
+    concern: CompiledConcern, prepared: PreparedText, cfg: Config
+) -> tuple[LineItem, ...]:
+    """Pair the fields a concern declares as line items, one row per line.
+
+    Only lines carrying a match for EVERY declared field count. "4/21/26 billed
+    amount $527" is a row; a line with just a date is not, because pairing it
+    with an amount from somewhere else would be an invention.
+    """
+    names = concern.line_item_fields
+    if len(names) < 2:
+        return ()
+    by_name = {f.name: f for f in concern.fields if f.name in names}
+    if len(by_name) != len(names):
+        return ()
+
+    items: list[LineItem] = []
+    for seg in prepared.segments:
+        if seg.kind == Segment.QUOTED_HISTORY.value and not cfg.search_quoted_history:
+            continue
+        for line in seg.text.split("\n"):
+            if not line.strip():
+                continue
+            row: dict[str, str] = {}
+            for name in names:
+                field = by_name[name]
+                if field.pattern is None:
+                    continue
+                blocked = _blocked_spans(field, line)
+                for raw, (s, e) in field.pattern.finditer(line):
+                    if any(s < be and e > bs for bs, be in blocked):
+                        continue
+                    value = normalize_value(raw, field.normalizer)
+                    if value:
+                        row[name] = value
+                        break
+            if len(row) == len(names):
+                items.append(LineItem(fields=row, line=line.strip()[:120]))
+
+        # Some email/Excel tables flatten each cell onto its own line:
+        #
+        #   DOS                AMOUNT BILLED              NOTES
+        #   11/21/2041         $ 246.80                   called for status
+        #
+        # Pair only adjacent STANDALONE value lines beneath a compact set of
+        # headers. Narrative lines reset a partial row, so values are never
+        # paired across prose or guessed from their overall list positions.
+        lines = seg.text.split("\n")
+        header_end: int | None = None
+        for start in range(len(lines)):
+            found: dict[str, int] = {}
+            for index in range(start, min(start + 5, len(lines))):
+                for name in names:
+                    if name not in found and _is_standalone_label(by_name[name], lines[index]):
+                        found[name] = index
+            if len(found) == len(names):
+                header_end = max(found.values())
+                break
+
+        if header_end is not None:
+            pending: dict[str, str] = {}
+            pending_lines: list[str] = []
+            nonblank = 0
+            for line in lines[header_end + 1 :]:
+                if not line.strip():
+                    continue
+                nonblank += 1
+                if nonblank > _LIST_MAX_LINES:
+                    break
+                matches = [
+                    (name, value)
+                    for name in names
+                    if (value := _standalone_value(by_name[name], line)) is not None
+                ]
+                if len(matches) != 1:
+                    pending.clear()
+                    pending_lines.clear()
+                    continue
+                name, value = matches[0]
+                if name in pending:
+                    pending.clear()
+                    pending_lines.clear()
+                pending[name] = value
+                pending_lines.append(line.strip())
+                if len(pending) == len(names):
+                    items.append(
+                        LineItem(
+                            fields=dict(pending),
+                            line=" | ".join(pending_lines)[:120],
+                        )
+                    )
+                    pending.clear()
+                    pending_lines.clear()
+    # Two lines can repeat the same pair; keep the first of each.
+    seen: set[tuple] = set()
+    out: list[LineItem] = []
+    for it in items:
+        key = tuple(sorted(it.fields.items()))
+        if key not in seen:
+            seen.add(key)
+            out.append(it)
+    return tuple(out)
