@@ -48,12 +48,7 @@ class HelperServer:
             )
             terminal = {
                 "type": "result",
-                "result": {
-                    "amount": result.amount,
-                    "outcome": result.outcome,
-                    "row_index": result.row_index,
-                    "rows_examined": result.rows_examined,
-                },
+                "result": result.to_dict(),
             }
         except AutomationError as exc:
             terminal = {"type": "error", "code": exc.code, "step": exc.step}

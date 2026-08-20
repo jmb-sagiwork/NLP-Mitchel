@@ -15,6 +15,7 @@ Action = Literal[
     "keys",
     "select_tab",
 ]
+Disposition = Literal["no_match", "denied", "paid"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,3 +80,12 @@ class WorkflowResult:
     outcome: str
     row_index: int = 0
     rows_examined: int = 1
+    disposition: Disposition = "no_match"
+    reply_template: str = ""
+    paid_amount: str | None = None
+    paid_date: str | None = None
+    check_number: str | None = None
+    denial_code: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)

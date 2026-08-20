@@ -43,6 +43,39 @@ class RetryHelper:
         self.closed = True
 
 
+class OrderedExtractor:
+    def __init__(self, emails, order):
+        self.emails = emails
+        self.order = order
+        self.closed = False
+
+    def extract(self, control, progress):
+        total = len(self.emails)
+        for index, email in enumerate(self.emails, start=1):
+            progress(index - 1, total, "extracting")
+            self.order.append(f"extract:{email.message_id}")
+            progress(index, total, "extracted")
+            yield email
+
+    def close(self):
+        self.closed = True
+
+
+class OrderedHelper:
+    def __init__(self, order):
+        self.order = order
+        self.closed = False
+
+    def run_job(self, job, control, progress, *, leave_open=True):
+        assert leave_open is False
+        self.order.append(f"smartadvisor:{job.source_message_id}")
+        progress("complete", "complete")
+        return {"reply_template": f"reply:{job.source_message_id}"}
+
+    def close(self):
+        self.closed = True
+
+
 def bill_result():
     return TriageResult(
         status=TriageStatus.CLASSIFIED,
@@ -90,3 +123,42 @@ def test_smartadvisor_error_pauses_and_resume_retries(monkeypatch):
     assert helper.closed and extractor.closed
     assert any(event.kind == "error" for event in events)
     assert events[-1].kind == "complete"
+
+
+def test_each_email_finishes_before_the_next_email_is_extracted(monkeypatch):
+    emails = [
+        ExtractedEmail("email-1", "Bill 1", "body 1", Path("email-1.txt")),
+        ExtractedEmail("email-2", "Bill 2", "body 2", Path("email-2.txt")),
+    ]
+    order = []
+    extractor = OrderedExtractor(emails, order)
+    helper = OrderedHelper(order)
+
+    def classify(*_args, **kwargs):
+        order.append(f"nlp:{kwargs['message_key']}")
+        return bill_result()
+
+    monkeypatch.setattr("mitchel_pipeline.orchestrator.classify_email", classify)
+    orchestrator = PipelineOrchestrator(
+        extractor,
+        enable_minilm=False,
+        helper=helper,
+        engine=object(),
+        on_reply=order.append,
+    )
+
+    summary = orchestrator.run(RunControl())
+
+    assert order == [
+        "extract:email-1",
+        "nlp:email-1",
+        "smartadvisor:email-1",
+        "reply:email-1",
+        "extract:email-2",
+        "nlp:email-2",
+        "smartadvisor:email-2",
+        "reply:email-2",
+    ]
+    assert summary.extracted == 2
+    assert summary.jobs_completed == 2
+    assert extractor.closed and helper.closed

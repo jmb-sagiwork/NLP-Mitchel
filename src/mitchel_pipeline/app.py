@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 import threading
 import tkinter as tk
@@ -7,7 +8,7 @@ from tkinter import messagebox, ttk
 
 from incontact_automation import IncontactExtractor
 
-from .models import PipelineEvent
+from .models import ExtractedEmail, PipelineEvent
 from .orchestrator import PipelineOrchestrator
 from .run_control import RunControl
 
@@ -18,8 +19,8 @@ class MitchelApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Mitchel NLP")
-        self.root.geometry("420x190")
-        self.root.minsize(390, 180)
+        self.root.geometry("500x250")
+        self.root.minsize(450, 235)
         self.root.resizable(True, False)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -28,13 +29,19 @@ class MitchelApp:
         self.worker: threading.Thread | None = None
         self.extractor: IncontactExtractor | None = None
         self.closing = False
-        self.login_events: list[threading.Event] = []
+        self.dialog_events: list[threading.Event] = []
 
         self.status = tk.StringVar(value="Ready")
         self.summary = tk.StringVar(value="Emails 0  |  Jobs 0/0  |  Skipped 0")
         self.progress = tk.DoubleVar(value=0)
         self.percent = tk.StringVar(value="0%")
         self.use_minilm = tk.BooleanVar(value=True)
+        self.show_extracted_email = tk.BooleanVar(value=True)
+        self.show_nlp_output = tk.BooleanVar(value=True)
+        self.extracted_popup_enabled = threading.Event()
+        self.extracted_popup_enabled.set()
+        self.nlp_popup_enabled = threading.Event()
+        self.nlp_popup_enabled.set()
 
         frame = ttk.Frame(root, padding=12)
         frame.pack(fill="both", expand=True)
@@ -47,12 +54,29 @@ class MitchelApp:
         ttk.Label(progress_row, textvariable=self.percent, width=5, anchor="e").pack(side="right")
         ttk.Label(frame, textvariable=self.summary).pack(anchor="w", pady=(0, 7))
 
-        controls = ttk.Frame(frame)
-        controls.pack(fill="x")
+        options = ttk.Frame(frame)
+        options.pack(fill="x")
         self.minilm_check = ttk.Checkbutton(
-            controls, text="Use MiniLM", variable=self.use_minilm
+            options, text="Use MiniLM", variable=self.use_minilm
         )
-        self.minilm_check.pack(side="left")
+        self.minilm_check.pack(anchor="w")
+        self.extracted_check = ttk.Checkbutton(
+            options,
+            text="Show extracted email",
+            variable=self.show_extracted_email,
+            command=self._sync_popup_options,
+        )
+        self.extracted_check.pack(anchor="w")
+        self.nlp_check = ttk.Checkbutton(
+            options,
+            text="Show NLP output",
+            variable=self.show_nlp_output,
+            command=self._sync_popup_options,
+        )
+        self.nlp_check.pack(anchor="w")
+
+        controls = ttk.Frame(frame)
+        controls.pack(fill="x", pady=(8, 0))
         self.pause_button = ttk.Button(
             controls, text="Pause", command=self._toggle_pause, state="disabled"
         )
@@ -62,25 +86,61 @@ class MitchelApp:
         self.root.after(self.POLL_MS, self._poll)
 
     def _manual_login_gate(self) -> None:
+        self._blocking_messagebox(
+            "NICE CXone login",
+            "Complete the NICE CXone login in Chrome.\n\n"
+            "When the page is fully ready, click OK to continue.",
+        )
+
+    def _blocking_messagebox(self, title: str, message: str) -> None:
+        """Show a Tk dialog from the worker and wait before continuing."""
+
         complete = threading.Event()
-        self.login_events.append(complete)
+        self.dialog_events.append(complete)
 
         def show() -> None:
             if self.closing:
                 complete.set()
                 return
-            messagebox.showinfo(
-                "NICE CXone login",
-                "Complete the NICE CXone login in Chrome.\n\n"
-                "When the page is fully ready, click OK to continue.",
-                parent=self.root,
-            )
-            complete.set()
+            try:
+                messagebox.showinfo(title, message, parent=self.root)
+            finally:
+                complete.set()
 
         self.root.after(0, show)
         while not complete.wait(0.1):
             if self.control is None or self.control.cancelled:
                 return
+
+    def _show_extracted(self, email: ExtractedEmail) -> None:
+        if not self.extracted_popup_enabled.is_set():
+            return
+        self._blocking_messagebox(
+            "Extracted email",
+            f"Subject: {email.subject or '(no subject)'}\n"
+            f"Saved: {email.saved_path}\n\n{email.body}",
+        )
+
+    def _show_nlp(self, result: dict[str, object]) -> None:
+        if not self.nlp_popup_enabled.is_set():
+            return
+        self._blocking_messagebox(
+            "NLP output",
+            json.dumps(result, indent=2, ensure_ascii=False, default=str),
+        )
+
+    def _show_reply(self, reply: str) -> None:
+        self._blocking_messagebox("Simulated email reply", reply)
+
+    def _sync_popup_options(self) -> None:
+        if self.show_extracted_email.get():
+            self.extracted_popup_enabled.set()
+        else:
+            self.extracted_popup_enabled.clear()
+        if self.show_nlp_output.get():
+            self.nlp_popup_enabled.set()
+        else:
+            self.nlp_popup_enabled.clear()
 
     def _start(self) -> None:
         if self.worker is not None and self.worker.is_alive():
@@ -97,6 +157,9 @@ class MitchelApp:
             self.extractor,
             enable_minilm=self.use_minilm.get(),
             emit=self.events.put,
+            on_extracted=self._show_extracted,
+            on_nlp=self._show_nlp,
+            on_reply=self._show_reply,
         )
 
         def run() -> None:
@@ -160,8 +223,8 @@ class MitchelApp:
         self.status.set("Closing safely after current action")
         if self.control is not None:
             self.control.cancel()
-        for login_event in self.login_events:
-            login_event.set()
+        for dialog_event in self.dialog_events:
+            dialog_event.set()
         if self.worker is None or not self.worker.is_alive():
             self.root.destroy()
 

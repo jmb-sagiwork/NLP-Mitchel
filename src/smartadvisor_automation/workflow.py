@@ -11,6 +11,8 @@ from smartadvisor_automation.errors import AutomationError, WorkflowCancelled
 from smartadvisor_automation.models import ControlSpec, WorkflowResult
 from smartadvisor_automation.selectors import (
     BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    BILL_HISTORY_TAB_ACCELERATOR,
+    BILL_HISTORY_TAB_NAME_FRAGMENT,
     BILL_LINES_AMOUNT_PREFIX,
     BILL_LINES_TAB_NAME_FRAGMENT,
     BILL_TAB_ACCELERATOR,
@@ -161,6 +163,135 @@ def describe_comparison(amount: str, expected: str, matched: bool) -> str:
 
     verdict = "MATCH" if matched else "no match"
     return f"amount={amount} vs expected={expected} -> {verdict}"
+
+
+_MONEY_RE = re.compile(r"-?\$?\s*[\d,]+(?:\.\d{1,2})?")
+_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+
+
+def _values_near_labels(
+    controls: list[tuple[str, str]],
+    labels: tuple[str, ...],
+) -> list[str]:
+    """Return a labelled control's text and its next few text controls.
+
+    The working all-in-one driver exposes controls in UIA traversal order.
+    SmartAdvisor versions vary between putting a label and value in one
+    control or in adjacent controls, so this supports both layouts without
+    inventing positional AutomationIds.
+    """
+
+    lowered = tuple(label.casefold().replace(" ", "") for label in labels)
+    values: list[str] = []
+    for index, (automation_id, text) in enumerate(controls):
+        haystack = f"{automation_id} {text}".casefold().replace(" ", "")
+        if not any(label in haystack for label in lowered):
+            continue
+        for _, candidate in controls[index : index + 4]:
+            normalized = re.sub(r"\s+", " ", candidate).strip()
+            if normalized and normalized not in values:
+                values.append(normalized)
+    return values
+
+
+def extract_history_details(
+    controls: list[tuple[str, str]],
+) -> tuple[str | None, str | None, str | None]:
+    """Extract paid amount, paid date, and check number from History controls."""
+
+    paid_amount = None
+    for candidate in _values_near_labels(
+        controls, ("paid amount", "amount paid", "paidamount")
+    ):
+        match = _MONEY_RE.search(candidate)
+        if match:
+            paid_amount = match.group(0).replace(" ", "")
+            break
+
+    paid_date = None
+    for candidate in _values_near_labels(
+        controls, ("paid date", "payment date", "paiddate")
+    ):
+        match = _DATE_RE.search(candidate)
+        if match:
+            paid_date = match.group(0)
+            break
+
+    check_number = None
+    labels = ("check number", "check no", "check #", "checknumber")
+    for candidate in _values_near_labels(controls, labels):
+        cleaned = candidate
+        lowered = cleaned.casefold()
+        for label in labels:
+            position = lowered.find(label)
+            if position >= 0:
+                cleaned = cleaned[position + len(label) :].lstrip(" :-#")
+                break
+        match = re.search(r"\b[A-Z0-9][A-Z0-9._/-]{1,63}\b", cleaned, re.IGNORECASE)
+        if match and not _DATE_RE.fullmatch(match.group(0)):
+            check_number = match.group(0)
+            break
+
+    return paid_amount, paid_date, check_number
+
+
+def extract_denial_code(controls: list[tuple[str, str]]) -> str | None:
+    """Extract a labelled denial/reason code from the selected Lines tab."""
+
+    labels = ("denial code", "denial reason", "reason code", "denialcode")
+    for candidate in _values_near_labels(controls, labels):
+        cleaned = candidate
+        lowered = cleaned.casefold()
+        for label in labels:
+            position = lowered.find(label)
+            if position >= 0:
+                cleaned = cleaned[position + len(label) :].lstrip(" :-#")
+                break
+        match = re.search(r"\b[A-Z0-9][A-Z0-9._/-]{0,31}\b", cleaned, re.IGNORECASE)
+        if match:
+            return match.group(0)
+    return None
+
+
+def build_reply_template(
+    disposition: str,
+    *,
+    claim_id: str,
+    dos_from: str,
+    expected_amount: str,
+    paid_amount: str | None = None,
+    paid_date: str | None = None,
+    check_number: str | None = None,
+    denial_code: str | None = None,
+) -> str:
+    """Build the simulated email displayed after one email is processed."""
+
+    header = "To: Requestor\nSubject: Bill Status Response\n\n"
+    if disposition == "no_match":
+        return (
+            header
+            + "Concern: No Bill on File\n\n"
+            + f"We could not locate a bill matching claim {claim_id}, "
+            + f"DOS {dos_from}, and billed amount {expected_amount}.\n"
+            + "Please resubmit the bill with the supporting medical reports."
+        )
+    if disposition == "denied":
+        return (
+            header
+            + "Concern: Completed Processing - Denied\n\n"
+            + f"The bill for claim {claim_id} and DOS {dos_from} was processed "
+            + "and denied.\n"
+            + f"Denial code: {denial_code or 'Unavailable'}"
+        )
+    return (
+        header
+        + "Concern: Completed Processing - Paid\n\n"
+        + f"The bill for claim {claim_id} and DOS {dos_from} was processed "
+        + "and paid.\n"
+        + f"Paid amount: {paid_amount or 'Unavailable'}\n"
+        + f"Paid date: {paid_date or 'Unavailable'}\n"
+        + f"Check number: {check_number or 'Unavailable'}"
+    )
 
 
 class NoBillOnFileWorkflow:
@@ -348,6 +479,108 @@ class NoBillOnFileWorkflow:
         self.log(f"amount read={amount}")
         return amount
 
+    def _select_and_scan_tab(
+        self,
+        step: str,
+        fragment: str,
+        accelerator: str,
+    ) -> list[tuple[str, str]]:
+        self._run_step(
+            step,
+            f"Switching to the {fragment} tab",
+            lambda: self.driver.select_tab(
+                CONTROLS_BY_STEP["7.4"],
+                expected_fragment=fragment,
+                accelerator=accelerator,
+                next_key=BILL_TAB_NEXT_KEY,
+                fallback_key=BILL_TAB_FALLBACK_KEY,
+                max_presses=BILL_TAB_MAX_PRESSES,
+                settle_timeout=BILL_TAB_SETTLE_TIMEOUT,
+            ),
+        )
+        self._check_cancelled()
+        self.progress(step, f"Reading {fragment} fields (slow)")
+        return self.driver.scan_texts(BILL_ENTRY_WINDOW_AUTOMATION_ID, "")
+
+    def _resolve_matched_bill(
+        self,
+        *,
+        claim_id: str,
+        dos_from: str,
+        expected_amount: str,
+        amount: str,
+        row_index: int,
+    ) -> WorkflowResult:
+        history = self._select_and_scan_tab(
+            "7.7",
+            BILL_HISTORY_TAB_NAME_FRAGMENT,
+            BILL_HISTORY_TAB_ACCELERATOR,
+        )
+        self._check_cancelled()
+        self.progress("7.8", "Evaluating the paid amount")
+        paid_amount, paid_date, check_number = extract_history_details(history)
+        if paid_amount is None:
+            raise AutomationError("paid_amount_not_readable", step="7.7")
+
+        if normalize_amount(paid_amount) == Decimal("0"):
+            lines = self._select_and_scan_tab(
+                "7.9",
+                BILL_LINES_TAB_NAME_FRAGMENT,
+                BILL_TAB_ACCELERATOR,
+            )
+            denial_code = extract_denial_code(lines)
+            if denial_code is None:
+                raise AutomationError("denial_code_not_readable", step="7.9")
+            disposition = "denied"
+            outcome = "Completed Processing - Denied"
+            reply = build_reply_template(
+                disposition,
+                claim_id=claim_id,
+                dos_from=dos_from,
+                expected_amount=expected_amount,
+                paid_amount=paid_amount,
+                denial_code=denial_code,
+            )
+            return WorkflowResult(
+                patient_account=None,
+                amount=amount,
+                outcome=outcome,
+                row_index=row_index,
+                rows_examined=row_index + 1,
+                disposition="denied",
+                reply_template=reply,
+                paid_amount=paid_amount,
+                denial_code=denial_code,
+            )
+
+        if paid_date is None:
+            raise AutomationError("paid_date_not_readable", step="7.7")
+        if check_number is None:
+            raise AutomationError("check_number_not_readable", step="7.7")
+        disposition = "paid"
+        outcome = "Completed Processing - Paid"
+        reply = build_reply_template(
+            disposition,
+            claim_id=claim_id,
+            dos_from=dos_from,
+            expected_amount=expected_amount,
+            paid_amount=paid_amount,
+            paid_date=paid_date,
+            check_number=check_number,
+        )
+        return WorkflowResult(
+            patient_account=None,
+            amount=amount,
+            outcome=outcome,
+            row_index=row_index,
+            rows_examined=row_index + 1,
+            disposition="paid",
+            reply_template=reply,
+            paid_amount=paid_amount,
+            paid_date=paid_date,
+            check_number=check_number,
+        )
+
     def run(
         self,
         claim_id: str,
@@ -390,23 +623,22 @@ class NoBillOnFileWorkflow:
             )
 
             if matched:
-                self.progress(
-                    "complete", f"Matched on row {row_index + 1}"
+                result = self._resolve_matched_bill(
+                    claim_id=claim_id,
+                    dos_from=dos_from,
+                    expected_amount=expected_amount,
+                    amount=amount,
+                    row_index=row_index,
                 )
-                self.log(f"match on row {row_index}; bill left open")
+                self.progress("complete", result.outcome)
+                self.log(f"match on row {row_index}; disposition={result.disposition}")
                 if not leave_match_open:
                     self._run_step(
                         "7.6",
                         "Closing the matched bill before the next job",
                         lambda: self.driver.click(CONTROLS_BY_STEP["7.6"]),
                     )
-                return WorkflowResult(
-                    patient_account=None,
-                    amount=amount,
-                    outcome=OUTCOME_MESSAGE,
-                    row_index=row_index,
-                    rows_examined=row_index + 1,
-                )
+                return result
 
             if previous_amount is not None and amount == previous_amount:
                 # The seek clamped at the last row, so this is a re-read of
@@ -420,8 +652,21 @@ class NoBillOnFileWorkflow:
                 # rerun. The bill is still open, which the scan needs.
                 self._diagnose_amount_controls(expected)
                 self.driver.click(CONTROLS_BY_STEP["7.6"])
-                raise AutomationError(
-                    "no_matching_candidate_row", step="7.5"
+                reply = build_reply_template(
+                    "no_match",
+                    claim_id=claim_id,
+                    dos_from=dos_from,
+                    expected_amount=expected_amount,
+                )
+                self.progress("complete", "No matching bill amount")
+                return WorkflowResult(
+                    patient_account=None,
+                    amount=amount,
+                    outcome=OUTCOME_MESSAGE,
+                    row_index=row_index,
+                    rows_examined=row_index + 1,
+                    disposition="no_match",
+                    reply_template=reply,
                 )
 
             previous_amount = amount

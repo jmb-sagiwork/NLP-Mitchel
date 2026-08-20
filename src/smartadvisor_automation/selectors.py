@@ -63,6 +63,8 @@ BILL_TAB_NEXT_KEY = "{RIGHT}"
 # than tab pages, so it is only reached if the other two fail.
 BILL_TAB_FALLBACK_KEY = "^{TAB}"
 BILL_LINES_TAB_NAME_FRAGMENT = "Lines"
+BILL_HISTORY_TAB_NAME_FRAGMENT = "History"
+BILL_HISTORY_TAB_ACCELERATOR = "%h"
 BILL_TAB_MAX_PRESSES = 12
 # A tab switch has to repaint before the Name reflects it, and over Citrix
 # that is not instant. Reading straight after a keystroke made a working

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -81,7 +81,7 @@ def _safe_filename(value: str) -> str:
 
 
 class IncontactExtractor:
-    """Extract the three configured CXone player emails with Selenium."""
+    """Yield configured CXone emails one at a time with Selenium."""
 
     def __init__(
         self,
@@ -109,7 +109,7 @@ class IncontactExtractor:
         self,
         control: RunControl,
         progress: ProgressCallback,
-    ) -> list[ExtractedEmail]:
+    ) -> Iterator[ExtractedEmail]:
         driver = self._create_driver()
         with self._driver_lock:
             self._driver = driver
@@ -120,7 +120,6 @@ class IncontactExtractor:
             self.login_gate()
             control.checkpoint()
 
-            extracted: list[ExtractedEmail] = []
             original_handle = driver.current_window_handle
             for index, player_url in enumerate(PLAYER_URLS, start=1):
                 control.checkpoint()
@@ -129,19 +128,20 @@ class IncontactExtractor:
                 driver.get(player_url)
                 text = keep_original_email(self._extract_text(driver))
                 path = self._save(text, driver.title, index)
-                extracted.append(
-                    ExtractedEmail(
-                        message_id=f"cxone-{index}",
-                        subject=_subject_from_email(text),
-                        body=text,
-                        saved_path=path,
-                    )
+                email = ExtractedEmail(
+                    message_id=f"cxone-{index}",
+                    subject=_subject_from_email(text),
+                    body=text,
+                    saved_path=path,
                 )
                 driver.close()
                 if original_handle in driver.window_handles:
                     driver.switch_to.window(original_handle)
                 progress(index, len(PLAYER_URLS), f"Extracted email {index} of {len(PLAYER_URLS)}")
-            return extracted
+                # Yield only after the browser window is cleaned up. The
+                # orchestrator completely classifies and actions this email
+                # before requesting the next item from the generator.
+                yield email
         finally:
             self.close()
 
