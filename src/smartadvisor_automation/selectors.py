@@ -65,21 +65,17 @@ BILL_TAB_FALLBACK_KEY = "^{TAB}"
 BILL_LINES_TAB_NAME_FRAGMENT = "Lines"
 BILL_HISTORY_TAB_NAME_FRAGMENT = "History"
 BILL_HISTORY_TAB_ACCELERATOR = "%h"
+BILL_HEADER_TAB_NAME_FRAGMENT = "Header"
 BILL_TAB_MAX_PRESSES = 12
 # A tab switch has to repaint before the Name reflects it, and over Citrix
 # that is not instant. Reading straight after a keystroke made a working
 # keystroke look like a no-op.
 BILL_TAB_SETTLE_TIMEOUT = 3.0
 
-# Charge amount on the Lines tab. The tab and pane names carry the line count
-# ("Lines(10)") so they are unusable as selectors; this control-array id is
-# stable across bills.
-BILL_LINES_AMOUNT_AUTOMATION_ID = "_lblTotals_59"
-# The "_59" suffix is a control-array position. A live run read a four-digit
-# total from a bill with 10+ lines and a two-digit one from a bill with
-# fewer, so the position does not track the bill total. The diagnostic scan
-# walks this prefix to find which index actually holds it.
-BILL_LINES_AMOUNT_PREFIX = "_lblTotals_"
+HISTORY_PAID_AMOUNT_AUTOMATION_ID = "_txtData_91"
+HISTORY_CHECK_TRANSACTION_AUTOMATION_ID = "_txtData_83"
+HEADER_PAID_DATE_AUTOMATION_ID = "_txtData_5"
+BILL_LINES_GRID_AUTOMATION_ID = "Spread1"
 
 # Non-client title bar button: it publishes no AutomationId, so it is found by
 # Name plus ControlType, scoped to the bill window. Unscoped it would match
@@ -109,6 +105,21 @@ GRID_CALIBRATE_DOWN = "{DOWN}"
 GRID_CALIBRATE_UP = "{UP}"
 GRID_SEEK_DOWN = "{DOWN}"
 GRID_CONFIRM_ROW = "{ENTER}"
+GRID_COPY_ROW = "^c"
+GRID_ROW_CLICK_X = 120
+GRID_FIRST_ROW_CLICK_Y = 43
+GRID_FIRST_ROW_LOWER_CLICK_Y = 64
+GRID_ROW_HEIGHT = 21
+
+LINES_ROW_SELECTOR_CLICK_X = 24
+LINES_BR_MSG_ROW_COPY_INDEX = 7
+LINES_BRADJ_MSG_ROW_COPY_INDEX = 14
+LINES_FIRST_ROW_CLICK_Y = 46
+LINES_ROW_HEIGHT = 21
+LINES_DENIED_CODE_MAX_ROWS = 80
+
+SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT = "Unhandled exception has occurred"
+SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME = "Continue"
 
 NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ControlSpec(
@@ -182,19 +193,40 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
     ),
     ControlSpec(
-        step="7.5",
-        automation_id=BILL_LINES_AMOUNT_AUTOMATION_ID,
-        label="Lines charge amount",
+        step="7.6",
+        automation_id=HISTORY_PAID_AMOUNT_AUTOMATION_ID,
+        label="History paid amount",
         action="extract",
         scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
     ),
     ControlSpec(
-        step="7.6",
+        step="7.10",
+        automation_id=HISTORY_CHECK_TRANSACTION_AUTOMATION_ID,
+        label="History check/transaction",
+        action="extract",
+        scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.12",
+        automation_id=HEADER_PAID_DATE_AUTOMATION_ID,
+        label="Header paid date",
+        action="extract",
+        scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.7",
         automation_id="",
         label="Close the bill window",
         action="close",
         name=BILL_CLOSE_BUTTON_NAME,
         control_type=BILL_CLOSE_BUTTON_CONTROL_TYPE,
+        scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.8",
+        automation_id=BILL_LINES_GRID_AUTOMATION_ID,
+        label="Lines grid denial messages",
+        action="extract",
         scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
     ),
 )

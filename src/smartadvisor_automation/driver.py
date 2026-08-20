@@ -19,6 +19,11 @@ from smartadvisor_automation.probe import (
 )
 from smartadvisor_automation.selectors import (
     BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS,
+    GRID_FIRST_ROW_CLICK_Y,
+    GRID_ROW_CLICK_X,
+    GRID_ROW_HEIGHT,
+    SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME,
+    SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT,
 )
 
 # A scoped selector's container is looked up from the top-level windows.
@@ -383,12 +388,60 @@ class SmartAdvisorDriver:
         )
         raise AutomationError(code, step=spec.step)
 
+    def resolve_visible(
+        self,
+        spec: ControlSpec,
+        *,
+        timeout: float | None = None,
+    ) -> Any:
+        """Resolve one visible control even when SmartAdvisor disables it."""
+
+        deadline = time.monotonic() + (
+            self.timeout if timeout is None else timeout
+        )
+        last_match_count = 0
+        while time.monotonic() < deadline:
+            try:
+                matches = matching_spec_elements(self._all_elements(spec), spec)
+            except AutomationError:
+                raise
+            except Exception:
+                matches = []
+
+            actionable = [
+                element
+                for element, _strategy in matches
+                if self._safe_state(element, "is_visible")
+            ]
+            last_match_count = len(actionable)
+            if last_match_count == 1:
+                return actionable[0]
+            time.sleep(self.poll_interval)
+
+        code = "selector_ambiguous" if last_match_count > 1 else "selector_not_found"
+        self._log(
+            f"resolve-visible {self._describe(spec)} -> {code} "
+            f"(matches={last_match_count})"
+        )
+        raise AutomationError(code, step=spec.step)
+
     @staticmethod
     def _safe_state(element: Any, method_name: str) -> bool:
         try:
             return bool(getattr(element, method_name)())
         except Exception:
             return False
+
+    @staticmethod
+    def _clamp_control_x(element: Any, x: int) -> int:
+        try:
+            rect = element.rectangle()
+            width = int(rect.right - rect.left)
+        except Exception:
+            return max(1, x)
+        if width <= 2:
+            return max(1, x)
+        return max(1, min(int(x), width - 2))
 
     def click(self, spec: ControlSpec) -> None:
         element = self.resolve(spec)
@@ -421,6 +474,107 @@ class SmartAdvisorDriver:
             raise AutomationError("focus_failed", step=spec.step) from exc
         self._log(f"focus {self._describe(spec)}")
 
+    def click_grid_row(
+        self,
+        spec: ControlSpec,
+        row_index: int,
+        *,
+        first_row_y: int = GRID_FIRST_ROW_CLICK_Y,
+    ) -> None:
+        """Select a FarPoint search-result row with a real mouse click."""
+
+        element = self.resolve(spec)
+        row_y = first_row_y + (GRID_ROW_HEIGHT * row_index)
+        try:
+            element.set_focus()
+        except Exception:
+            pass
+        click_x = self._clamp_control_x(element, GRID_ROW_CLICK_X)
+        try:
+            element.click_input(coords=(click_x, row_y))
+        except Exception as exc:
+            raise AutomationError("row_click_failed", step=spec.step) from exc
+        self.acknowledge_smartadvisor_exception_popup(timeout=0.5)
+        self._log(
+            f"click-row {self._describe(spec)} row={row_index} "
+            f"coords=({click_x},{row_y})"
+        )
+
+    def click_at(self, spec: ControlSpec, *, x: int, y: int) -> None:
+        """Click a fixed point inside an owner-drawn SmartAdvisor control."""
+
+        element = self.resolve(spec)
+        try:
+            element.set_focus()
+        except Exception:
+            pass
+        click_x = self._clamp_control_x(element, x)
+        try:
+            element.click_input(coords=(click_x, y))
+        except Exception as exc:
+            raise AutomationError("click_at_failed", step=spec.step) from exc
+        self.acknowledge_smartadvisor_exception_popup(timeout=0.5)
+        self._log(f"click-at {self._describe(spec)} coords=({click_x},{y})")
+
+    def acknowledge_smartadvisor_exception_popup(
+        self,
+        *,
+        timeout: float = 1.0,
+    ) -> bool:
+        """Click Continue on SmartAdvisor's .NET exception dialog."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                windows = self._windows_for_process()
+            except AutomationError:
+                return False
+
+            for window in windows:
+                elements = self._elements_in_scope(window, depth=5)
+                has_exception_text = any(
+                    SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT.casefold()
+                    in self._element_name(element).casefold()
+                    for element in elements
+                )
+                if not has_exception_text:
+                    continue
+
+                for element in elements:
+                    info = getattr(element, "element_info", None)
+                    control_type = str(
+                        getattr(info, "control_type", "") or ""
+                    ).casefold()
+                    name = self._element_name(element).strip().replace("&", "")
+                    if (
+                        control_type == "button"
+                        and name.casefold()
+                        == SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME.casefold()
+                    ):
+                        try:
+                            element.click_input()
+                        except Exception as exc:
+                            raise AutomationError(
+                                "smartadvisor_exception_continue_failed"
+                            ) from exc
+                        self._log(
+                            "acknowledged SmartAdvisor exception popup with Continue"
+                        )
+                        return True
+
+                try:
+                    window.set_focus()
+                    window.type_keys("{ENTER}", set_foreground=True)
+                except Exception as exc:
+                    raise AutomationError(
+                        "smartadvisor_exception_continue_failed"
+                    ) from exc
+                self._log("acknowledged SmartAdvisor exception popup with Enter")
+                return True
+
+            time.sleep(self.poll_interval)
+        return False
+
     def send_keys(self, spec: ControlSpec, keys: str) -> None:
         """Type into an already-focused control without re-clicking it."""
 
@@ -433,6 +587,19 @@ class SmartAdvisorDriver:
         except Exception as exc:
             raise AutomationError("send_keys_failed", step=spec.step) from exc
         self._log(f"keys {self._describe(spec)} {keys}")
+
+    def send_focused_keys(self, keys: str, *, step: str) -> None:
+        """Type into whichever SmartAdvisor control currently owns focus."""
+
+        if not keys:
+            return
+        try:
+            from pywinauto.keyboard import send_keys
+
+            send_keys(keys)
+        except Exception as exc:
+            raise AutomationError("send_keys_failed", step=step) from exc
+        self._log(f"keys focused {keys}")
 
     @staticmethod
     def _element_name(element: Any) -> str:
@@ -773,9 +940,29 @@ class SmartAdvisorDriver:
         )
         return found
 
-    def read_text(self, spec: ControlSpec) -> str:
-        element = self.resolve(spec)
+    def read_text(
+        self,
+        spec: ControlSpec,
+        *,
+        timeout: float | None = None,
+    ) -> str:
+        try:
+            element = self.resolve(spec, timeout=timeout)
+        except AutomationError:
+            if spec.action != "extract":
+                raise
+            element = self.resolve_visible(spec, timeout=timeout)
         candidates: list[str] = []
+
+        try:
+            candidates.append(str(element.get_value() or ""))
+        except Exception:
+            pass
+
+        try:
+            candidates.append(str(element.iface_value.CurrentValue or ""))
+        except Exception:
+            pass
 
         try:
             candidates.append(str(element.window_text() or ""))

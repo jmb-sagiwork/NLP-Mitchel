@@ -5,6 +5,9 @@ from smartadvisor_automation.workflow import (
     build_reply_template,
     extract_denial_code,
     extract_history_details,
+    extract_lines_br_msg_code_from_clipboard,
+    extract_lines_bradj_code_from_clipboard,
+    parse_search_result_clipboard,
 )
 
 
@@ -65,17 +68,22 @@ class _NoMatchDriver:
 
 
 class _NoMatchWorkflow(NoBillOnFileWorkflow):
+    def __init__(self, driver):
+        super().__init__(driver)
+        self.search_calls = 0
+        self.rows_selected = []
+
     def _search(self, claim_id, dos_from):
-        pass
+        self.search_calls += 1
 
     def _select_row(self, row_index):
-        pass
+        self.rows_selected.append(row_index)
 
-    def _read_candidate_amount(self):
-        return "10.00"
-
-    def _diagnose_amount_controls(self, expected):
-        pass
+    def _copy_selected_search_row(self, row_index):
+        return {
+            "Bill Search DCN": "DCN-1",
+            "Total Charges": "10.00",
+        }
 
 
 def test_no_matching_amount_returns_a_normal_result():
@@ -86,3 +94,93 @@ def test_no_matching_amount_returns_a_normal_result():
     assert result.disposition == "no_match"
     assert result.rows_examined == 2
     assert "Concern: No Bill on File" in result.reply_template
+    assert workflow.search_calls == 1
+    assert workflow.rows_selected == [0, 1]
+
+
+def test_search_result_clipboard_maps_total_charges_and_row_details():
+    values = [""] * 28
+    values[4] = "CLIENT"
+    values[5] = "BILL-77"
+    values[14] = "PATIENT-9"
+    values[26] = "$527.00"
+
+    parsed = parse_search_result_clipboard("\t".join(values))
+
+    assert parsed["Total Charges"] == "$527.00"
+    assert parsed["Bill no"] == "BILL-77"
+    assert parsed["Patient Account"] == "PATIENT-9"
+
+
+def test_lines_clipboard_uses_current_bradj_and_br_message_columns():
+    values = [""] * 16
+    values[7] = "U02"
+    values[14] = "C56"
+    copied = "\t".join(values)
+
+    assert extract_lines_br_msg_code_from_clipboard(copied) == "U02"
+    assert extract_lines_bradj_code_from_clipboard(copied) == "C56"
+
+
+class _StatusDriver:
+    pass
+
+
+class _StatusWorkflow(NoBillOnFileWorkflow):
+    def __init__(self, paid_amount):
+        super().__init__(_StatusDriver())
+        self.paid_amount = paid_amount
+        self.tabs = []
+        self.opened = 0
+
+    def _open_selected_bill(self):
+        self.opened += 1
+
+    def _select_bill_tab(self, step, label, fragment):
+        self.tabs.append(label)
+
+    def _wait_for_history_paid_amount(self):
+        return self.paid_amount
+
+    def _read_history_check_transaction(self):
+        return "CHK-77421"
+
+    def _read_header_paid_date(self):
+        return "08/20/2026"
+
+    def _read_lines_denied_codes(self):
+        return "C56", "U02"
+
+
+def _resolve_status(workflow):
+    return workflow._resolve_matched_bill(
+        claim_id="4211490-1",
+        dos_from="08/01/2026",
+        expected_amount="527.00",
+        amount="527.00",
+        row_index=0,
+        row_details={"Patient Account": "PATIENT-9"},
+    )
+
+
+def test_zero_paid_amount_uses_history_then_lines_denial_flow():
+    workflow = _StatusWorkflow("0.00")
+
+    result = _resolve_status(workflow)
+
+    assert result.disposition == "denied"
+    assert result.denial_code == "C56, U02"
+    assert workflow.opened == 1
+    assert workflow.tabs == ["History", "Lines"]
+
+
+def test_nonzero_paid_amount_uses_history_then_header_payment_flow():
+    workflow = _StatusWorkflow("527.00")
+
+    result = _resolve_status(workflow)
+
+    assert result.disposition == "paid"
+    assert result.paid_date == "08/20/2026"
+    assert result.check_number == "CHK-77421"
+    assert workflow.opened == 1
+    assert workflow.tabs == ["History", "Header"]
