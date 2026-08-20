@@ -84,6 +84,8 @@ class WorkflowDriver(Protocol):
 
 def validate_claim_id(value: str) -> str:
     normalized = value.strip()
+    if re.fullmatch(r"\d{8}", normalized):
+        normalized = f"{normalized[:-1]}-{normalized[-1]}"
     if not re.fullmatch(r"[A-Za-z0-9._/-]{1,64}", normalized):
         raise ValueError(
             "Claim ID may contain only letters, numbers, dots, underscores, "

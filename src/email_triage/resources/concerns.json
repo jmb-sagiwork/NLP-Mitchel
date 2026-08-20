@@ -474,7 +474,7 @@
       "clm",
       "your claim #"
      ],
-     "normalizer": "upper_alnum",
+     "normalizer": "claim_id",
      "reject_prefix": [
       "bill/",
       "our bill",
@@ -798,7 +798,7 @@
       "clm",
       "your claim #"
      ],
-     "normalizer": "upper_alnum",
+     "normalizer": "claim_id",
      "reject_prefix": [
       "bill/",
       "our bill",

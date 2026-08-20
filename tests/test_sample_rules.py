@@ -55,10 +55,11 @@ def test_missing_amount_routes_to_review_without_relabelling(rules_engine):
 @pytest.mark.parametrize(
     "text, expected",
     [
-        ("Bill status. Claim #: 4477881-1\nDOS: 03/14/2026\nBilled amount: $10.00", "44778811"),
-        ("Bill status. Claim number: 35700021\nDOS: 03/14/2026\nBilled: $10.00", "35700021"),
+        ("Bill status. Claim #: 4477881-1\nDOS: 03/14/2026\nBilled amount: $10.00", "4477881-1"),
+        ("Bill status. Claim number: 35700021\nDOS: 03/14/2026\nBilled: $10.00", "3570002-1"),
+        ("Bill status. Claim number: 42114901\nDOS: 03/14/2026\nBilled: $10.00", "4211490-1"),
         ("Bill status. Your Claim #: A0091447\nDOS: 03/14/2026\nBilled: $10.00", "A0091447"),
-        ("Bill status. Clm: 5512206-1\nDOS: 03/14/2026\nBilled: $10.00", "55122061"),
+        ("Bill status. Clm: 5512206-1\nDOS: 03/14/2026\nBilled: $10.00", "5512206-1"),
     ],
 )
 def test_claim_id_suffix_is_not_dropped(rules_engine, text, expected):
@@ -76,7 +77,7 @@ def test_provider_own_bill_number_is_not_read_as_the_claim_id(rules_engine):
         "Ref #: 9900771-4\n"
         "Bill/Claim #: S990088100201\n"
     )
-    assert r.values["claim_id"] == "35700021"
+    assert r.values["claim_id"] == "3570002-1"
 
 
 # --------------------------------------------------------------------------

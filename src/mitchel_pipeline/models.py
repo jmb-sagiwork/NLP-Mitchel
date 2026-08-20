@@ -5,6 +5,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 
+def normalize_claim_number(value: str) -> str:
+    """Format a numeric 7-digit stem plus final check digit as XXXXXXX-X."""
+    normalized = value.strip()
+    compact = normalized.replace("-", "")
+    if len(compact) == 8 and compact.isdigit():
+        return f"{compact[:-1]}-{compact[-1]}"
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class ExtractedEmail:
     """One CXone email after reply-chain cleanup."""
@@ -23,6 +32,9 @@ class SmartAdvisorJob:
     dos_from: str
     expected_amount: str
     source_message_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "claim_id", normalize_claim_number(self.claim_id))
 
     @property
     def deduplication_key(self) -> tuple[str, str, str]:

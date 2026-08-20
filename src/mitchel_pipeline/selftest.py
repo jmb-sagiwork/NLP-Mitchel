@@ -11,7 +11,7 @@ from pathlib import Path
 SAMPLE_SUBJECT = "Bill status"
 SAMPLE_BODY = (
     "Bill status request.\n"
-    "Claim ID: WC7788991\n"
+    "Claim ID: 42114901\n"
     "DOS: 05/01/2026\n"
     "Expected amount: $3,410.55\n"
 )
@@ -65,7 +65,7 @@ def selftest() -> int:
             engine.embeddings_active
             and result.concern_id == "bill_status"
             and len(jobs) == 1
-            and jobs[0].claim_id == "WC7788991"
+            and jobs[0].claim_id == "4211490-1"
             and jobs[0].dos_from == "05/01/2026"
             and jobs[0].expected_amount == "3410.55"
         )

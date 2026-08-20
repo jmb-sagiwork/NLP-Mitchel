@@ -47,6 +47,14 @@ def _norm_upper_alnum(raw: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", raw.upper())
 
 
+def _norm_claim_id(raw: str) -> str:
+    """Preserve the carrier suffix separator for 7-digit + check-digit IDs."""
+    normalized = _norm_upper_alnum(raw)
+    if re.fullmatch(r"\d{8}", normalized):
+        return f"{normalized[:-1]}-{normalized[-1]}"
+    return normalized
+
+
 def _norm_digits(raw: str) -> str:
     return re.sub(r"\D", "", raw)
 
@@ -84,6 +92,7 @@ def _norm_date_iso(raw: str) -> str:
 NORMALIZERS = {
     "trim": _norm_trim,
     "upper_alnum": _norm_upper_alnum,
+    "claim_id": _norm_claim_id,
     "digits": _norm_digits,
     "money": _norm_money,
     "date_iso": _norm_date_iso,

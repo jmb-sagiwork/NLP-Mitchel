@@ -3,6 +3,7 @@ from __future__ import annotations
 from email_triage.types import FieldValue, LineItem, TriageResult, TriageStatus
 
 from mitchel_pipeline.jobs import deduplicate_jobs, jobs_from_result
+from mitchel_pipeline.models import SmartAdvisorJob
 
 
 def result(*, line_items=(), dos_values=(), amount_values=()) -> TriageResult:
@@ -80,3 +81,15 @@ def test_non_bill_status_is_skipped():
     )
 
     assert jobs_from_result(triage, "email-1") == []
+
+
+def test_numeric_claim_check_digit_is_hyphenated_for_smartadvisor():
+    job = SmartAdvisorJob(
+        claim_id="42114901",
+        dos_from="04/21/2026",
+        expected_amount="527.00",
+        source_message_id="email-1",
+    )
+
+    assert job.claim_id == "4211490-1"
+    assert job.to_dict()["claim_id"] == "4211490-1"
