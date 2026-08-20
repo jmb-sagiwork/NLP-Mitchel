@@ -1,7 +1,8 @@
-# Email Triage
+# Mitchel NLP
 
-Reads an email, decides **what type of concern** it expresses, and extracts **the
-data that concern requires**. Runs fully offline on CPU.
+Mitchel is an attended Windows workflow that extracts configured emails from
+NICE CXone, classifies them locally, and sends eligible bill-status jobs to
+SmartAdvisor. The NLP inference path runs fully offline on CPU.
 
 Example: concern **Bill Status** carries a reason (`not a bill on file`, `completed processing and denied`, ...) and seven fields: Claim ID, DOS, Patient Account, Prov TIN, Expected Amount, DOI, DOB.
 
@@ -58,46 +59,32 @@ flattener first; the engine expects text.
 Reuse one `TriageEngine` across calls. `classify_email` without one falls back
 to a lazily-built default, which is fine for a script and wasteful in a server.
 
-## Download the demo (Windows, no install)
+## Download Mitchel NLP (Windows, no install)
 
-**[EmailTriage-v0.1.2-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.2/EmailTriage-v0.1.2-windows-x64.exe)** — one self-contained 56 MB file. Download, double-click, done.
+**[MitchelNLP-v0.2.0-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.2.0/MitchelNLP-v0.2.0-windows-x64.exe)** — the complete attended application in one executable. Download and double-click to run.
 
-The MiniLM encoder is **inside** the exe. No Python, no internet, no folder to
-keep together. Copy it anywhere and it runs.
+The executable contains Python, the MiniLM encoder, Selenium, and the x86
+SmartAdvisor helper. The target machine still needs Google Chrome and an
+authenticated SmartAdvisor session, but it does not need Python or a separate
+model download. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
 
-Fallback: **[EmailTriage-v0.1.2-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.2/EmailTriage-v0.1.2-windows-x64.zip)** — the same app as an unpacked folder
-(approximately 57 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
-if the ~4 s cold start matters; keep that folder intact. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
+Run the packaged diagnostic first on a new machine:
 
-Run this first on any new machine:
-
-```
-EmailTriage.exe --selftest
+```powershell
+.\MitchelNLP-v0.2.0-windows-x64.exe --selftest
 ```
 
-It writes `selftest.json`, exits 0/1, and reports the interpreter, whether
-resources resolved, and whether the embedding layer loaded. `"embeddings_active":
-true` is the line that proves the model came along.
-
-The teaching commands work on the exe too, with no Python installed:
-
-```
-EmailTriage.exe --proposals              # what reviewers asked for
-EmailTriage.exe --scaffold refund_request  # concerns.json block for one
-```
-
-The exe is windowed and so has no console — each of these also drops its output
-in a file beside the executable (`proposals.txt`, `scaffold_<id>.json`).
-
-Both builds write `data/dataset.jsonl` next to the .exe. **That file holds real
-email text and must stay on the client machine.**
+It writes `mitchel-selftest.json` beside the executable and verifies MiniLM,
+the NLP-to-job mapping, Selenium, and the embedded helper handshake without
+opening CXone or changing SmartAdvisor.
 
 ## Quick start
 
 ```bash
 py -3.14 scripts/fetch_model.py     # one time, needs internet (23 MB)
-py -3.14 run_ui.py                  # teaching window
-py -3.14 -m pytest -q               # 103 tests
+py -3.14 -m mitchel_pipeline        # combined attended workflow
+py -3.14 run_ui.py                  # optional NLP teaching window
+py -3.14 -m pytest -q               # 111 tests
 ```
 
 Once the packages are installed (`pip install -e .`), the same two entry points
@@ -108,48 +95,17 @@ are `email-triage` (engine CLI: `check-config`, `classify`) and
 Without the model the engine still runs on regex + rules and caps confidence at
 70%. It degrades; it does not crash.
 
-## Building the EXE
+## Building the combined EXE
 
-```bash
-py -3.14 scripts/build_exe.py --clean              # one-dir: dist/EmailTriage/
-py -3.14 scripts/build_exe.py --onefile --clean    # one-file: dist/EmailTriage.exe
+```powershell
+py -3.14 scripts/build_mitchel.py --clean
 ```
 
-One-dir produces `dist/EmailTriage/` (~128 MB) with a double-clickable
-`EmailTriage.exe` beside its `_internal` folder. One-file folds that whole folder
-into a single 58 MB exe. Either way everything is bundled — Python, ONNX Runtime,
-the encoder, `concerns.json` — and the target machine needs **no Python and no
-internet**.
-
-Pick one-file for handing someone a single artifact; pick one-dir when startup
-latency matters or the endpoint blocks self-extracting exes. The bootloader
-unpacks one-file to a temp dir on **every** launch, so cold start is ~4 s against
-roughly instant for one-dir. Both resolve resources through `sys._MEIPASS` and
-both write `data/dataset.jsonl` next to the real exe, so on-disk behaviour is
-identical.
-
-The build script runs the frozen binary's self-test from a temp directory before
-declaring success, because a build that merely produces an `.exe` is not
-evidence that the model came along with it.
-
-```bash
-dist/EmailTriage/EmailTriage.exe --selftest     # writes selftest.json, exit 0/1
-```
-
-That flag is also the field diagnostic for "it won't start on this machine" —
-it reports the interpreter, whether resources resolved, whether the embedding
-layer loaded, and a full traceback on failure.
-
-**Scope:** this freezes `email_triage_ui`, the teaching harness. The library a
-host system imports stays a wheel — a frozen exe cannot be imported by another
-interpreter's `main.py`. Two different deliverables; see `pipeline.md`
-SP-1.1-31 and SP-1.1-55.
-
-Notes:
-- Close the app before rebuilding; Windows locks the bundled DLLs. The script
-  detects this and says so.
-- `data/dataset.jsonl` is written **next to the .exe**, not in the working
-  directory. It holds real email text.
+The build creates `dist/MitchelNLP.exe`. It verifies the MiniLM hashes, compiles
+the SmartAdvisor helper with x86 Python, verifies both PE architectures, embeds
+the helper into the x64 main application, and runs the frozen self-test before
+declaring success. See [`PACKAGING.md`](PACKAGING.md) for prerequisites and the
+full build/run notes.
 
 ## How it works
 

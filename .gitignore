@@ -21,6 +21,8 @@ dist_runtime/
 build/
 *.egg-info/
 selftest.json
+mitchel-selftest.json
+.build-tools/
 
 # Python
 __pycache__/

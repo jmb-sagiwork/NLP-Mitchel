@@ -4,10 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "email-triage"
-version = "0.1.2"
+version = "0.2.0"
 description = "Offline email concern classification and field extraction"
 requires-python = ">=3.11,<3.15"
-dependencies = []
+dependencies = [
+    "selenium>=4.25,<5",
+]
 
 [project.optional-dependencies]
 # Layer 3. The engine runs without these on rules + structural only.
@@ -15,10 +17,13 @@ embeddings = ["onnxruntime>=1.24", "numpy>=1.26", "tokenizers>=0.19"]
 # Optional convenience only. Never import at module scope.
 frames = ["pandas>=2.0"]
 dev = ["pytest>=8", "ruff>=0.6"]
+smartadvisor = ["pywinauto==0.6.9"]
+build = ["pyinstaller>=6.20,<7"]
 
 [project.scripts]
 email-triage = "email_triage.__main__:main"
 email-triage-ui = "email_triage_ui.__main__:main"
+mitchel-nlp = "mitchel_pipeline.__main__:main"
 
 # Two distributions in one repo on purpose: `email_triage` is what a host app
 # imports, `email_triage_ui` is the teaching harness. Nothing in the engine

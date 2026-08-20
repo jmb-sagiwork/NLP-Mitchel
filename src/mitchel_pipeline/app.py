@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+import queue
+import threading
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+from incontact_automation import IncontactExtractor
+
+from .models import PipelineEvent
+from .orchestrator import PipelineOrchestrator
+from .run_control import RunControl
+
+
+class MitchelApp:
+    POLL_MS = 75
+
+    def __init__(self, root: tk.Tk) -> None:
+        self.root = root
+        self.root.title("Mitchel NLP")
+        self.root.geometry("420x190")
+        self.root.minsize(390, 180)
+        self.root.resizable(True, False)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
+
+        self.events: queue.Queue[PipelineEvent] = queue.Queue()
+        self.control: RunControl | None = None
+        self.worker: threading.Thread | None = None
+        self.extractor: IncontactExtractor | None = None
+        self.closing = False
+        self.login_events: list[threading.Event] = []
+
+        self.status = tk.StringVar(value="Ready")
+        self.summary = tk.StringVar(value="Emails 0  |  Jobs 0/0  |  Skipped 0")
+        self.progress = tk.DoubleVar(value=0)
+        self.percent = tk.StringVar(value="0%")
+        self.use_minilm = tk.BooleanVar(value=True)
+
+        frame = ttk.Frame(root, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, textvariable=self.status).pack(anchor="w")
+        progress_row = ttk.Frame(frame)
+        progress_row.pack(fill="x", pady=(8, 4))
+        ttk.Progressbar(progress_row, variable=self.progress, maximum=100).pack(
+            side="left", fill="x", expand=True
+        )
+        ttk.Label(progress_row, textvariable=self.percent, width=5, anchor="e").pack(side="right")
+        ttk.Label(frame, textvariable=self.summary).pack(anchor="w", pady=(0, 7))
+
+        controls = ttk.Frame(frame)
+        controls.pack(fill="x")
+        self.minilm_check = ttk.Checkbutton(
+            controls, text="Use MiniLM", variable=self.use_minilm
+        )
+        self.minilm_check.pack(side="left")
+        self.pause_button = ttk.Button(
+            controls, text="Pause", command=self._toggle_pause, state="disabled"
+        )
+        self.pause_button.pack(side="right")
+        self.start_button = ttk.Button(controls, text="Start", command=self._start)
+        self.start_button.pack(side="right", padx=(0, 8))
+        self.root.after(self.POLL_MS, self._poll)
+
+    def _manual_login_gate(self) -> None:
+        complete = threading.Event()
+        self.login_events.append(complete)
+
+        def show() -> None:
+            if self.closing:
+                complete.set()
+                return
+            messagebox.showinfo(
+                "NICE CXone login",
+                "Complete the NICE CXone login in Chrome.\n\n"
+                "When the page is fully ready, click OK to continue.",
+                parent=self.root,
+            )
+            complete.set()
+
+        self.root.after(0, show)
+        while not complete.wait(0.1):
+            if self.control is None or self.control.cancelled:
+                return
+
+    def _start(self) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            return
+        self.control = RunControl()
+        self.progress.set(0)
+        self.percent.set("0%")
+        self.status.set("Starting")
+        self.start_button.configure(state="disabled")
+        self.pause_button.configure(state="normal", text="Pause")
+        self.minilm_check.configure(state="disabled")
+        self.extractor = IncontactExtractor(login_gate=self._manual_login_gate)
+        orchestrator = PipelineOrchestrator(
+            self.extractor,
+            enable_minilm=self.use_minilm.get(),
+            emit=self.events.put,
+        )
+
+        def run() -> None:
+            try:
+                orchestrator.run(self.control)  # type: ignore[arg-type]
+            except Exception as exc:
+                self.events.put(
+                    PipelineEvent("error", f"Run stopped: {type(exc).__name__}", 0)
+                )
+            finally:
+                self.events.put(PipelineEvent("status", "__worker_stopped__", 0))
+
+        self.worker = threading.Thread(target=run, name="mitchel-pipeline", daemon=True)
+        self.worker.start()
+
+    def _toggle_pause(self) -> None:
+        if self.control is None:
+            return
+        if self.control.paused:
+            self.control.resume()
+            self.pause_button.configure(text="Pause")
+            self.status.set("Resuming")
+        else:
+            self.control.pause()
+            self.pause_button.configure(text="Resume")
+            self.status.set("Pausing after current action")
+
+    def _poll(self) -> None:
+        try:
+            while True:
+                event = self.events.get_nowait()
+                if event.message == "__worker_stopped__":
+                    self._run_stopped()
+                    continue
+                self.progress.set(event.progress)
+                self.percent.set(f"{round(event.progress)}%")
+                if event.kind == "summary":
+                    self.summary.set(event.message)
+                else:
+                    self.status.set(event.message)
+                if event.kind == "error" and self.control is not None and self.control.paused:
+                    self.pause_button.configure(text="Resume")
+        except queue.Empty:
+            pass
+        if self.closing and (self.worker is None or not self.worker.is_alive()):
+            self.root.destroy()
+            return
+        self.root.after(self.POLL_MS, self._poll)
+
+    def _run_stopped(self) -> None:
+        self.pause_button.configure(state="disabled", text="Pause")
+        self.start_button.configure(state="normal")
+        self.minilm_check.configure(state="normal")
+        self.control = None
+        self.extractor = None
+
+    def _close(self) -> None:
+        if self.closing:
+            return
+        self.closing = True
+        self.status.set("Closing safely after current action")
+        if self.control is not None:
+            self.control.cancel()
+        for login_event in self.login_events:
+            login_event.set()
+        if self.worker is None or not self.worker.is_alive():
+            self.root.destroy()
+
+
+def main() -> int:
+    root = tk.Tk()
+    MitchelApp(root)
+    root.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
