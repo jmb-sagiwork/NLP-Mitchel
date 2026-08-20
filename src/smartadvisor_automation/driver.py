@@ -682,10 +682,10 @@ class SmartAdvisorDriver:
         """
 
         element = self.resolve(spec)
-        wanted = expected_fragment.casefold()
+        wanted = self._normalize_tab_name(expected_fragment)
 
         start = self._element_name(element)
-        if wanted in start.casefold():
+        if wanted in self._normalize_tab_name(start):
             self._log(
                 f"tab {self._describe(spec)} already on "
                 f"{start}"
@@ -695,7 +695,12 @@ class SmartAdvisorDriver:
             f"tab {self._describe(spec)} starts on {start}"
         )
 
-        for attempt in ("accelerator", "click_then_arrow", "fallback_key"):
+        for attempt in (
+            "accelerator",
+            "click_then_arrow",
+            "scan_clicks",
+            "fallback_key",
+        ):
             if attempt == "accelerator":
                 worked = self._tab_by_accelerator(
                     element,
@@ -711,6 +716,12 @@ class SmartAdvisorDriver:
                     max_presses=max_presses,
                     settle_timeout=settle_timeout,
                     click_strip_first=True,
+                )
+            elif attempt == "scan_clicks":
+                worked = self._tab_by_scan_clicks(
+                    element,
+                    wanted=wanted,
+                    settle_timeout=settle_timeout,
                 )
             else:
                 worked = self._tab_by_keypresses(
@@ -728,6 +739,10 @@ class SmartAdvisorDriver:
             self._log(f"tab {attempt} did not reach {expected_fragment!r}")
 
         raise AutomationError("tab_not_found", step=spec.step)
+
+    @staticmethod
+    def _normalize_tab_name(name: str) -> str:
+        return re.sub(r"[&\s]+", "", name).casefold()
 
     def _tab_by_accelerator(
         self,
@@ -750,7 +765,7 @@ class SmartAdvisorDriver:
             timeout=settle_timeout,
         )
         self._log(f"tab after accelerator: {name}")
-        return wanted in name.casefold()
+        return wanted in self._normalize_tab_name(name)
 
     def _tab_by_keypresses(
         self,
@@ -775,7 +790,7 @@ class SmartAdvisorDriver:
         seen: set[str] = set()
         for _press in range(max_presses):
             before = self._element_name(element)
-            if wanted in before.casefold():
+            if wanted in self._normalize_tab_name(before):
                 return True
             if before and before in seen:
                 self._log(f"tab strip cycled using {key}")
@@ -794,12 +809,70 @@ class SmartAdvisorDriver:
                 timeout=settle_timeout,
             )
             self._log(f"tab after {key}: {name}")
-            if wanted in name.casefold():
+            if wanted in self._normalize_tab_name(name):
                 return True
             if name == before:
                 # The keystroke moved nothing, so more of them will not help.
                 self._log(f"tab unchanged by {key}")
                 return False
+
+        return False
+
+    def _tab_by_scan_clicks(
+        self,
+        element: Any,
+        *,
+        wanted: str,
+        settle_timeout: float,
+    ) -> bool:
+        """Click across the visible tab strip and verify the selected page.
+
+        Some SmartAdvisor/Citrix sessions stop honoring RIGHT/CTRL+TAB after a
+        tab page loads, even though the target tab is visibly present. The tab
+        control does not expose individual tab items, so scanning the strip
+        with relative coordinates is the most stable fallback that still
+        verifies success from the control's own Name.
+        """
+
+        try:
+            rect = element.rectangle()
+            strip_height = 24
+            children = element.children()
+            if children:
+                page_top = children[0].rectangle().top
+                derived = page_top - rect.top
+                if 8 <= derived <= 80:
+                    strip_height = derived
+            width = max(0, rect.right - rect.left)
+        except Exception:
+            return False
+
+        if width < 80:
+            return False
+
+        y = max(4, strip_height // 2)
+        max_x = max(40, min(width - 20, 1050))
+        candidates = list(range(35, max_x + 1, 55))
+        if max_x not in candidates:
+            candidates.append(max_x)
+
+        before = self._element_name(element)
+        for x in candidates:
+            try:
+                element.click_input(coords=(x, y))
+            except Exception:
+                continue
+
+            name = self._wait_for_tab_name(
+                element,
+                wanted=wanted,
+                differs_from=before,
+                timeout=max(settle_timeout, 1.5),
+            )
+            self._log(f"tab after scan click x={x}: {name}")
+            if wanted in self._normalize_tab_name(name):
+                return True
+            before = name
 
         return False
 
@@ -812,10 +885,15 @@ class SmartAdvisorDriver:
         """Check for an optional control without failing when it is absent."""
 
         try:
-            self.resolve(spec, timeout=timeout)
+            element = self.resolve(spec, timeout=timeout)
         except AutomationError:
             self._log(f"optional {self._describe(spec)} absent")
             return False
+        if (
+            spec.automation_id
+            and str(spec.control_type or "").casefold() == "window"
+        ):
+            self._scope_cache[spec.automation_id] = element
         self._log(f"optional {self._describe(spec)} present")
         return True
 
