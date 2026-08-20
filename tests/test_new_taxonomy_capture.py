@@ -123,12 +123,12 @@ def test_scaffold_emits_a_pasteable_concern_block(rules_engine, tmp_path, capsys
     block = json.loads(out.out)          # stdout is clean JSON, nothing else
     assert block["id"] == "refund_request"
     assert block["display_name"] == "Refund Request"
-    # Empty on purpose: prototypes are the one thing that cannot be derived
-    # from a label, and draft=true makes check-config say so.
-    assert block["prototypes"] == []
-    assert block["examples"] == []
+    # Empty on purpose: safe phrase rules cannot be derived from a label.
+    assert block["keyword_rules"] == {
+        "positive": [], "negative": [], "decisive": []
+    }
     assert block["draft"] is True
-    assert "prototypes" in out.err       # guidance goes to stderr
+    assert "keyword_rules" in out.err       # guidance goes to stderr
 
 
 def test_scaffold_of_a_reason_names_the_concern_to_nest_it_in(rules_engine, tmp_path, capsys):
@@ -157,7 +157,7 @@ def test_scaffold_never_leaks_email_text(rules_engine, tmp_path, capsys):
 
 
 def test_scaffold_does_not_touch_concerns_json(rules_engine, tmp_path, capsys):
-    """A block with no prototypes would classify nothing while looking done."""
+    """A block with no rules would classify nothing while looking done."""
     config = Path(__file__).resolve().parents[1] / (
         "src/email_triage/resources/concerns.json"
     )

@@ -64,8 +64,7 @@ def main() -> int:
     per_field = {name: [0, 0, 0, 0] for name, _ in COLUMNS.values()}  # hit, miss, wrong, partial
     review = 0
 
-    print(f"engine {'3 layers' if engine.embeddings_active else '2 layers (no model)'}"
-          f"  |  config {engine.config.config_version}\n")
+    print(f"engine rules + structural  |  config {engine.config.config_version}\n")
 
     for r in range(2, ws.max_row + 1):
         rows += 1

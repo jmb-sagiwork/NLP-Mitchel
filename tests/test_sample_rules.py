@@ -171,9 +171,8 @@ def test_a_quoted_claim_number_label_is_not_a_claim_information_signal(rules_eng
     assert r.concern_id == "bill_status"
 
 
-def test_eob_copy_request_overrides_embedding_similarity(engine):
-    """An explicit EOB request is bill disposition work, even when the field
-    dump resembles the claim-information prototypes to MiniLM."""
+def test_eob_copy_request_is_decisive(engine):
+    """An explicit EOB request is bill disposition work even with a field dump."""
     r = engine.classify(
         "Can you provide us with a copy of the EOB for the date of service below?\n"
         "Claim Number - ZX8042719-6\nDOS: 12/19/2042\nBilled Amt: $7,654.32",

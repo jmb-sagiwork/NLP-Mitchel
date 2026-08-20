@@ -6,7 +6,7 @@
 
 A build that produces an .exe is not evidence. This runs the frozen binary's
 --selftest from a foreign working directory (which is how a real operator will
-launch it) and fails loudly if the bundled model or config did not come along.
+launch it) and fails loudly if the bundled config did not come along.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 SPEC = PROJECT / "EmailTriage.spec"
-MODEL = PROJECT / "src" / "email_triage" / "resources" / "model" / "model_quint8_avx2.onnx"
 EXE_NAME = "EmailTriage.exe"
 
 
@@ -51,7 +50,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clean", action="store_true", help="remove build/ and dist/ first")
     ap.add_argument("--onefile", action="store_true",
-                    help="single self-contained exe (encoder inside it); slower cold start")
+                    help="single self-contained exe; slower cold start")
     args = ap.parse_args()
 
     # One-file puts the exe straight in dist/ with no folder around it, so
@@ -59,11 +58,6 @@ def main() -> int:
     dist_root = PROJECT / "dist"
     bundle = dist_root if args.onefile else dist_root / "EmailTriage"
     exe = bundle / EXE_NAME
-
-    if not MODEL.exists():
-        print("Model not found. Run: py -3.14 scripts/fetch_model.py")
-        print("(Building without it produces an exe that silently runs on rules only.)")
-        return 1
 
     # A running instance holds its DLLs open and PyInstaller fails mid-build
     # with a bare WinError 5 that names a random .pyd. Say what is actually wrong.
@@ -98,7 +92,7 @@ def main() -> int:
         print(f"  bundle    {human(tree_size(bundle))}")
 
     # Run from somewhere else entirely: a frozen app must not depend on cwd.
-    # One-file also unpacks ~122 MB to temp on first launch, so allow longer.
+    # One-file unpacks its runtime to temp on first launch, so allow longer.
     print("\nSelf-test (from a temp working directory)...")
     (bundle / "selftest.json").unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
@@ -119,7 +113,6 @@ def main() -> int:
         return 1
 
     print(f"  ok               : {report['ok']}")
-    print(f"  embeddings active: {report['embeddings_active']}")
     print(f"  layers           : {', '.join(report['layers'])}")
     print(f"  concerns         : {len(report['concern_ids'])}")
     res = report["result"]

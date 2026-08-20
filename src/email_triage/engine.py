@@ -1,12 +1,7 @@
 """Fusion, decision, and the engine object.
 
-Two behaviours here are deliberate and worth not "fixing":
-
-1. Evidence shrinkage. A concern authored with one prototype cannot reach high
-   confidence no matter how well it matches, so a thin taxonomy routes to human
-   review instead of guessing confidently. Adding examples is what earns trust.
-
-2. A missing required field never changes the label. It flags the gap and lowers
+One behaviour here is deliberate and worth not "fixing": a missing required
+field never changes the label. It flags the gap and lowers
    confidence. Silently relabelling because a regex missed would be worse.
 """
 
@@ -24,51 +19,29 @@ from .extract import (
     restore_line_item_multiplicity,
     validate_line_items,
 )
-from .layers import (
-    EmbeddingLayer,
-    find_pattern_hits,
-    rule_score,
-    structural_score,
-    try_load_embeddings,
-)
+from .layers import find_pattern_hits, rule_score, structural_score
 from .textprep import prepare
 from .types import Explanation, LayerScore, TriageResult, TriageStatus
 
-# Cap applied when Layer 3 is unavailable: rules alone should not look certain.
-NO_MODEL_CONFIDENCE_CAP = 0.70
 MISSING_FIELD_PENALTY = 0.80
-# Reason scoring is rules-led; see _classify_reason.
-REASON_EMBEDDING_WEIGHT = 0.25
 
 
 class TriageEngine:
-    """Holds the compiled config and (if present) the embedding model.
-
-    Construct once and reuse. Building an InferenceSession per call is expensive.
-    """
+    """Deterministic regex, structural, and phrase-rule triage engine."""
 
     def __init__(
         self,
         config_path: str | Path | None = None,
-        model_dir: str | Path | None = None,
         *,
         thresholds: Mapping[str, float] | None = None,
-        enable_embeddings: bool = True,
         force_review: bool = False,
     ) -> None:
         self.config: Config = load_config(Path(config_path) if config_path else None)
         if thresholds:
             self.config.thresholds.update(thresholds)
         self.force_review = force_review
-        self._embeddings: EmbeddingLayer | None = (
-            try_load_embeddings(self.config, model_dir) if enable_embeddings else None
-        )
 
     # ---- introspection ---------------------------------------------------
-
-    @property
-    def embeddings_active(self) -> bool:
-        return self._embeddings is not None
 
     @property
     def concern_ids(self) -> tuple[str, ...]:
@@ -76,8 +49,7 @@ class TriageEngine:
 
     @property
     def layers_used(self) -> tuple[str, ...]:
-        base = ("structural", "rules")
-        return ("embeddings", *base) if self.embeddings_active else base
+        return ("structural", "rules")
 
     # ---- main path -------------------------------------------------------
 
@@ -106,64 +78,47 @@ class TriageEngine:
             )
 
         hits = find_pattern_hits(prepared, cfg.patterns)
-        probs = (
-            self._embeddings.probabilities(prepared.classify_text)
-            if self._embeddings
-            else {}
-        )
-
-        # Weights, renormalized if Layer 3 is missing.
         w = dict(cfg.fusion_weights)
-        if not probs:
-            w["embedding"] = 0.0
-        total_w = sum(w.get(k, 0.0) for k in ("embedding", "rules", "structural")) or 1.0
+        total_w = sum(w.get(k, 0.0) for k in ("rules", "structural")) or 1.0
 
         scores: list[LayerScore] = []
         for concern in cfg.enabled_concerns:
             s_struct, gate_ok = structural_score(concern, hits)
             rs = rule_score(concern, prepared, cfg)
-            p_emb = probs.get(concern.id, 0.0)
 
             fused = (
-                w.get("embedding", 0.0) * p_emb
-                + w.get("rules", 0.0) * rs.score
+                w.get("rules", 0.0) * rs.score
                 + w.get("structural", 0.0) * s_struct
             ) / total_w
             if not gate_ok and concern.gate_penalty:
                 fused *= 1.0 - concern.gate_penalty
 
-            sat = min(1.0, concern.evidence_count / max(cfg.evidence_saturation_k, 1))
             scores.append(
                 LayerScore(
                     concern_id=concern.id,
-                    embedding=round(p_emb, 4),
                     rules=round(rs.score, 4),
                     structural=round(s_struct, 4),
                     fused=round(fused, 4),
-                    saturation=round(sat, 4),
                     decisive_hits=rs.decisive,
                     keyword_hits=rs.hits,
                     gate_satisfied=gate_ok,
                 )
             )
 
-        # The background class competes as a real option.
+        # With no rule evidence, ordinary correspondence competes as the
+        # background signal instead of being forced into a tracked concern.
+        best_rules = max((s.rules for s in scores), default=0.0)
         bg_fused = (
-            (w.get("embedding", 0.0) * probs.get(cfg.background_id, 0.0)) / total_w
-            if probs
-            else 0.0
+            max(0.0, 0.35 - best_rules)
+            / max(total_w, 1e-9)
+            * w.get("rules", 0.75)
         )
-        if not probs:
-            # With no embeddings, "nothing matched" is the background signal.
-            best_rules = max((s.rules for s in scores), default=0.0)
-            bg_fused = max(0.0, 0.35 - best_rules) / max(total_w, 1e-9) * w.get("rules", 0.3)
 
         ranked = sorted(scores, key=self._sort_key, reverse=True)
 
         # A decisive rule must be able to OVERRIDE the fused ranking, not merely
-        # boost a concern that was already winning - otherwise an unambiguous
-        # "bill status" loses to whatever the embedding layer happened to prefer,
-        # which is exactly what "decisive" is supposed to prevent.
+        # boost a concern that was already winning. "Decisive" means explicit
+        # configured intent outranks an otherwise close fused score.
         decisive_owners = [s for s in scores if s.decisive_hits and s.gate_satisfied]
         is_decisive = len(decisive_owners) == 1
         if is_decisive:
@@ -177,16 +132,13 @@ class TriageEngine:
 
         concern = cfg.concern(top.concern_id)
         assert concern is not None
-        confidence = top.fused * top.saturation
+        confidence = top.fused
         reason = "threshold"
 
         if is_decisive:
-            confidence = max(confidence, 0.90 * top.saturation)
+            confidence = max(confidence, 0.90)
             margin = max(margin, cfg.thresholds["margin"])
             reason = "decisive_rule"
-
-        if not self.embeddings_active:
-            confidence = min(confidence, NO_MODEL_CONFIDENCE_CAP)
 
         # Sub-classify the reason within the winning concern.
         reason_id, reason_name, reason_conf, reason_alts = self._classify_reason(
@@ -239,7 +191,7 @@ class TriageEngine:
             missing_fields=missing,
             ambiguous_fields=ambiguous,
             alternatives=tuple(
-                (s.concern_id, round(s.fused * s.saturation, 4)) for s in ranked[:3]
+                (s.concern_id, round(s.fused, 4)) for s in ranked[:3]
             ),
             explanation=Explanation(
                 layers_used=self.layers_used,
@@ -273,28 +225,15 @@ class TriageEngine:
             return None, None, 0.0, ()
 
         cfg = self.config
-        probs = (
-            self._embeddings.reason_probabilities(prepared.classify_text, concern.id)
-            if self._embeddings
-            else {}
-        )
-        # Reasons are stock dispositions stated near-verbatim ("not a bill on
-        # file"), not paraphrases, so rules lead here and embeddings only break
-        # ties. Concern-level weights would let the encoder invent a disposition
-        # the email never mentions.
-        w_emb = REASON_EMBEDDING_WEIGHT if probs else 0.0
-        w_rule = 1.0 - w_emb
-
         scored: list[tuple[str, float]] = []
         rule_scores: dict[str, float] = {}
         for reason in concern.reasons:
             rs = rule_score(reason, prepared, cfg)
             rule_scores[reason.id] = rs.score
-            fused = w_emb * probs.get(reason.id, 0.0) + w_rule * rs.score
+            fused = rs.score
             if rs.decisive:
                 fused = max(fused, 0.85)
-            sat = min(1.0, reason.evidence_count / max(cfg.evidence_saturation_k, 1))
-            scored.append((reason.id, fused * sat))
+            scored.append((reason.id, fused))
 
         scored.sort(key=lambda x: (-x[1], x[0]))
         alts = tuple(scored[:3])
@@ -320,7 +259,6 @@ class TriageEngine:
             len(s.decisive_hits),
             s.structural,
             s.rules,
-            s.embedding,
             -(concern.priority if concern else 999),
             s.concern_id,
         )

@@ -12,30 +12,19 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_dynamic_libs
-
 PROJECT = Path(SPECPATH)
 
-# One self-contained EmailTriage.exe with the encoder inside it, vs a folder
-# beside the exe. See the trade-off note at the bottom of this file.
+# One self-contained EmailTriage.exe vs a folder beside the exe.
 ONEFILE = os.environ.get("EMAILTRIAGE_ONEFILE") == "1"
 SRC = PROJECT / "src"
 RESOURCES = SRC / "email_triage" / "resources"
 
-# Ship the config the operator edits, the regex library, and the encoder.
+# Ship the config the operator edits and the regex library.
 datas = [
     (str(RESOURCES / "concerns.json"), "email_triage/resources"),
     (str(RESOURCES / "patterns.library.json"), "email_triage/resources"),
 ]
-model_dir = RESOURCES / "model"
-for name in ("model_quint8_avx2.onnx", "tokenizer.json", "MANIFEST.json"):
-    f = model_dir / name
-    if f.exists():
-        datas.append((str(f), "email_triage/resources/model"))
-
-# onnxruntime loads its native libs by name; PyInstaller does not find them
-# from the Python imports alone.
-binaries = collect_dynamic_libs("onnxruntime")
+binaries = []
 
 a = Analysis(
     # Must be the launcher, not email_triage_ui/app.py. PyInstaller runs the
@@ -48,14 +37,10 @@ a = Analysis(
     hiddenimports=[
         "email_triage",
         "email_triage_ui",
-        "onnxruntime",
-        "tokenizers",
-        "numpy",
     ],
     hookspath=[],
     runtime_hooks=[],
-    # Nothing here is imported at runtime, and each one is tens to hundreds of
-    # MB. torch alone is ~497 MB for what a 22 MB ONNX file does.
+    # Nothing here is imported at runtime.
     excludes=[
         "torch",
         "transformers",
@@ -110,8 +95,8 @@ if not ONEFILE:
     )
 
 # One-file trade-off, for whoever reads this next:
-#   - The bootloader unpacks ~122 MB (onnxruntime DLLs, Tk, the 22 MB encoder)
-#     to a temp dir on every launch, so cold start is seconds, not instant.
+#   - The bootloader unpacks the Python/Tk runtime to a temp dir on every
+#     launch, so cold start is slower than one-dir mode.
 #   - config.py already resolves resources through sys._MEIPASS, and
 #     email_triage_ui/app.py writes data/dataset.jsonl next to sys.executable -
 #     which stays the real exe path, not the temp dir. So both modes behave

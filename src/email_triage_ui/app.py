@@ -1,8 +1,8 @@
 """Tkinter harness for teaching the triage engine.
 
 This is a teaching tool, not the product. Paste a body, see exactly what the
-NLP concluded and why, then correct it - every saved row becomes a labelled
-training example for the MiniLM prototypes and the keyword rules.
+NLP concluded and why, then correct it - every saved row becomes labelled
+evidence for improving the regexes and keyword rules.
 
 The engine imports nothing from this package. A host application integrates
 with `email_triage.classify_email(body, subject)` and never ships this window.
@@ -497,12 +497,8 @@ class TriageApp:
 
     def _on_engine_ready(self, engine: TriageEngine) -> None:
         self.engine = engine
-        if engine.embeddings_active:
-            self.engine_pill.set("3 LAYERS", th.OK)
-            detail = "regex + rules + MiniLM embeddings"
-        else:
-            self.engine_pill.set("2 LAYERS", th.WARN)
-            detail = "regex + rules only - model absent, confidence capped at 70%"
+        self.engine_pill.set("2 LAYERS", th.OK)
+        detail = "regex + deterministic rules"
         n = len(engine.concern_ids)
         self.engine_label.configure(
             text=f"{detail}  |  {n} concern types  |  config {engine.config.config_version}"
@@ -643,8 +639,6 @@ class TriageApp:
             warns.append(
                 f"Multiple inquiries: {len(result.line_items)} paired DOS/amount row(s)."
             )
-        if not self.engine or not self.engine.embeddings_active:
-            warns.append("Embedding layer inactive: confidence is capped at 70%.")
         self.warn_label.configure(text="\n".join(warns))
 
         self._fill(self.plain_out, to_plain_text(result))
@@ -654,7 +648,6 @@ class TriageApp:
             to_explanation_text(
                 result,
                 thresholds=self.engine.config.thresholds if self.engine else None,
-                embeddings_active=bool(self.engine and self.engine.embeddings_active),
             ),
         )
         self._reset_correction_inputs()
@@ -742,7 +735,6 @@ class TriageApp:
             to_explanation_text(
                 self.result,
                 thresholds=self.engine.config.thresholds if self.engine else None,
-                embeddings_active=bool(self.engine and self.engine.embeddings_active),
             )
         )
         self.save_status.configure(text="explanation copied to clipboard")

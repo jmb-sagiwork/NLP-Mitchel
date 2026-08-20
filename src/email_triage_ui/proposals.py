@@ -2,7 +2,7 @@
 
 The Teach bar can capture a label the taxonomy does not contain, but a row in
 `dataset.jsonl` teaches the engine nothing on its own - a concern only becomes
-predictable once someone writes prototypes for it in `concerns.json`. This is
+predictable once someone writes explicit rules for it in `concerns.json`. This is
 the bridge: it tells you what people keep meeting that the config cannot name,
 and how often.
 
@@ -105,8 +105,8 @@ def format_report(data: dict) -> str:
 
     if data["concerns"] or data["reasons"]:
         add("Next step: add each one to src/email_triage/resources/concerns.json")
-        add("with 3-5 prototypes (plain-English descriptions of what the sender")
-        add("wants), then run `python -m email_triage check-config`. Until then")
+        add("with positive, negative, and decisive phrase rules, then run")
+        add("`python -m email_triage check-config`. Until then")
         add("the engine cannot predict them - it can only record that you asked.")
     return "\n".join(lines)
 
@@ -127,11 +127,10 @@ def report(path: str | Path = DATASET_PATH) -> int:
 def concern_block(concern_id: str, display_name: str) -> dict:
     """A ready-to-paste `concerns` entry with everything but the thinking.
 
-    `prototypes` and `examples` are left empty on purpose. Prototypes are the
-    one thing that cannot be derived from a label - they are what Layer 3
-    embeds - and examples must not be filled from the dataset, which holds real
-    email text. `draft: true` makes the unfinished state show up in
-    `check-config` instead of looking done.
+    Keyword rules are left empty on purpose: a label alone cannot tell us which
+    wording is safe, decisive, or likely to collide with another concern.
+    `draft: true` makes the unfinished state show up in `check-config` instead
+    of looking done.
     """
     return {
         "id": concern_id,
@@ -140,8 +139,6 @@ def concern_block(concern_id: str, display_name: str) -> dict:
         "draft": True,
         "priority": 100,
         "description_internal": "TODO: one line on what this concern means.",
-        "prototypes": [],
-        "examples": [],
         "keyword_rules": {"positive": [], "negative": [], "decisive": []},
         "structural_gate": {"require_any_pattern": [], "penalty_if_absent": 0.0},
         "reasons": [],
@@ -154,8 +151,6 @@ def reason_block(reason_id: str, display_name: str) -> dict:
     return {
         "id": reason_id,
         "display_name": display_name,
-        "prototypes": [],
-        "examples": [],
         "keyword_rules": {"positive": [], "negative": [], "decisive": []},
     }
 
@@ -176,14 +171,10 @@ def _guidance(kind: str, entry: dict, parent_hint: str) -> str:
 
     lines += [
         "The block above is deliberately incomplete. To finish it:",
-        "  1. Write 3-5 'prototypes' - plain-English sentences describing what",
-        "     the sender wants. These are embedded and compared semantically;",
-        "     they are descriptions, not keywords, and they are the only reason",
-        "     the engine will ever predict this label.",
-        "  2. Add 'examples' - short realistic phrasings with FAKE identifiers.",
-        "     Do not paste rows out of dataset.jsonl; that file holds real email",
-        "     text and concerns.json is committed to git.",
-        "  3. Add 'keyword_rules.positive' for phrases that are dead giveaways.",
+        "  1. Add 'keyword_rules.positive' phrases that support this label.",
+        "  2. Add negative phrases for wording that belongs to another concern.",
+        "  3. Add a decisive phrase only when it is unambiguous on its own.",
+        "     Use synthetic examples; dataset.jsonl contains real email text.",
     ]
     if kind == "concern":
         lines += [
@@ -195,9 +186,7 @@ def _guidance(kind: str, entry: dict, parent_hint: str) -> str:
         "  5. Drop 'draft': true once it is real, then run:",
         "       python -m email_triage check-config",
         "",
-        "Until prototypes exist this label cannot be predicted, and with fewer",
-        "than 4 prototypes+examples evidence shrinkage caps its confidence, so",
-        "it will always route to human review (pipeline SP-1.1-20).",
+        "Until explicit rules exist this label cannot be predicted reliably.",
         "",
         "Nothing was written to concerns.json - paste it yourself, so the config",
         "is never edited by a process that cannot judge whether it is finished.",

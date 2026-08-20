@@ -71,59 +71,23 @@ def test_decisive_rule_overrides_the_fused_ranking(rules_engine):
     assert r.explanation.reason == "decisive_rule"
 
 
-def test_confidence_capped_without_embedding_layer(rules_engine):
-    assert rules_engine.embeddings_active is False
-    r = rules_engine.classify("Bill status for Claim ID WC1234567.")
-    assert r.confidence <= 0.70
-    assert "embeddings" not in r.explanation.layers_used
+def test_engine_reports_only_deterministic_layers(rules_engine):
+    r = rules_engine.classify(
+        "Bill status for Claim ID WC1234567, DOS 03/14/2026, billed amount $10.00."
+    )
+    assert rules_engine.layers_used == ("structural", "rules")
+    assert r.explanation.layers_used == ("structural", "rules")
+    assert r.confidence > 0.70
 
 
 def test_force_review_leaves_scores_intact():
     from email_triage.engine import TriageEngine
 
-    eng = TriageEngine(enable_embeddings=False, force_review=True)
+    eng = TriageEngine(force_review=True)
     r = eng.classify("Bill status for Claim ID WC1234567, DOS 03/14/2026.")
     assert r.needs_review is True
     assert r.status is TriageStatus.CLASSIFIED, "force_review must not change the label"
     assert r.confidence > 0
-
-
-def test_evidence_shrinkage_caps_a_thin_concern(tmp_path):
-    """A concern with one prototype and no examples must not look confident."""
-    import json
-    import shutil
-
-    from email_triage.config import PATTERNS_PATH
-    from email_triage.engine import TriageEngine
-
-    shutil.copy(PATTERNS_PATH, tmp_path / "patterns.library.json")
-    cfg = {
-        "config_version": "thin-test",
-        "defaults": {
-            "fusion_weights": {"embedding": 0.0, "rules": 0.8, "structural": 0.2},
-            "evidence_saturation_k": 4,
-        },
-        "concerns": [{
-            "id": "thin",
-            "display_name": "Thin Concern",
-            "prototypes": ["A single prototype and nothing else."],
-            "keyword_rules": {"positive": [{"phrase": "widget adjustment", "weight": 5.0}]},
-            "fields": [{
-                "name": "claim_id",
-                "required": True,
-                "pattern_ref": "claim_id",
-                "label_aliases": ["claim"],
-            }],
-        }],
-    }
-    p = tmp_path / "concerns.json"
-    p.write_text(json.dumps(cfg), encoding="utf-8")
-
-    eng = TriageEngine(config_path=p, enable_embeddings=False)
-    r = eng.classify("Please process the widget adjustment for claim WC1234567.")
-    assert r.explanation.scores[0].saturation == 0.25
-    assert r.confidence <= 0.25
-    assert r.needs_review is True
 
 
 def test_determinism(rules_engine):
@@ -160,9 +124,7 @@ def test_outputs_render(rules_engine):
 
 
 def test_reason_is_not_invented_without_supporting_wording(engine):
-    """Softmax always hands its mass to something. An inbound question states no
-    disposition, so no reason may be emitted - with embeddings ON, which is the
-    configuration where this failure actually appeared."""
+    """An inbound question states no disposition, so no reason may be emitted."""
     r = engine.classify(
         "Bill status for claim ID WC1234567. We sent this over on 03/14/2026."
     )

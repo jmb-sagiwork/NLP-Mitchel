@@ -17,11 +17,5 @@ class PatternError(ConfigError):
     code = "PATTERN_ERROR"
 
 
-class ModelUnavailable(TriageError):
-    """Layer 3 could not load. The engine degrades rather than failing."""
-
-    code = "MODEL_UNAVAILABLE"
-
-
 class MailSourceError(TriageError):
     code = "MAIL_SOURCE_ERROR"

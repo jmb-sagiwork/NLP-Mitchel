@@ -23,8 +23,8 @@ result.to_dict()         # fully JSON-serialisable
 
 That is the whole integration surface. Everything else is internal.
 
-See [`TECH_STACK.md`](TECH_STACK.md) for the full stack walkthrough and the four
-levers for teaching the engine without writing code.
+See [`TECH_STACK.md`](TECH_STACK.md) for the rules-only architecture and tuning
+workflow.
 
 ## Dropping it into another app
 
@@ -32,7 +32,7 @@ The repo is two packages, and the dependency only points one way:
 
 | Package | What it is | Depends on |
 |---|---|---|
-| `email_triage` | the engine — classification, extraction, config | nothing but stdlib (plus the optional `embeddings` extra) |
+| `email_triage` | the engine — classification, extraction, config | Python standard library only |
 | `email_triage_ui` | the teaching window | `email_triage` |
 
 Your app takes the first one and never sees the second. Nothing in the engine
@@ -42,7 +42,7 @@ asserts that rather than trusting it.
 ```python
 from email_triage import TriageEngine, classify_email
 
-engine = TriageEngine()                       # load the model once, at startup
+engine = TriageEngine()                       # load and compile the rules once
 for msg in inbox:                             # your inbox, your loop
     result = classify_email(msg.body, msg.subject, engine=engine)
     if result.needs_review:
@@ -58,46 +58,11 @@ flattener first; the engine expects text.
 Reuse one `TriageEngine` across calls. `classify_email` without one falls back
 to a lazily-built default, which is fine for a script and wasteful in a server.
 
-## Download the demo (Windows, no install)
-
-**[EmailTriage-v0.1.2-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.2/EmailTriage-v0.1.2-windows-x64.exe)** — one self-contained 56 MB file. Download, double-click, done.
-
-The MiniLM encoder is **inside** the exe. No Python, no internet, no folder to
-keep together. Copy it anywhere and it runs.
-
-Fallback: **[EmailTriage-v0.1.2-windows-x64.zip](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.1.2/EmailTriage-v0.1.2-windows-x64.zip)** — the same app as an unpacked folder
-(approximately 57 MB zipped). Use it if a locked-down endpoint blocks self-extracting exes, or
-if the ~4 s cold start matters; keep that folder intact. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/releases))
-
-Run this first on any new machine:
-
-```
-EmailTriage.exe --selftest
-```
-
-It writes `selftest.json`, exits 0/1, and reports the interpreter, whether
-resources resolved, and whether the embedding layer loaded. `"embeddings_active":
-true` is the line that proves the model came along.
-
-The teaching commands work on the exe too, with no Python installed:
-
-```
-EmailTriage.exe --proposals              # what reviewers asked for
-EmailTriage.exe --scaffold refund_request  # concerns.json block for one
-```
-
-The exe is windowed and so has no console — each of these also drops its output
-in a file beside the executable (`proposals.txt`, `scaffold_<id>.json`).
-
-Both builds write `data/dataset.jsonl` next to the .exe. **That file holds real
-email text and must stay on the client machine.**
-
 ## Quick start
 
 ```bash
-py -3.14 scripts/fetch_model.py     # one time, needs internet (23 MB)
 py -3.14 run_ui.py                  # teaching window
-py -3.14 -m pytest -q               # 103 tests
+py -3.14 -m pytest -q               # test the deterministic engine
 ```
 
 Once the packages are installed (`pip install -e .`), the same two entry points
@@ -105,8 +70,7 @@ are `email-triage` (engine CLI: `check-config`, `classify`) and
 `email-triage-ui` (the window), or `python -m email_triage` /
 `python -m email_triage_ui`.
 
-Without the model the engine still runs on regex + rules and caps confidence at
-70%. It degrades; it does not crash.
+There is no model download, optional inference runtime, or network dependency.
 
 ## Building the EXE
 
@@ -115,30 +79,28 @@ py -3.14 scripts/build_exe.py --clean              # one-dir: dist/EmailTriage/
 py -3.14 scripts/build_exe.py --onefile --clean    # one-file: dist/EmailTriage.exe
 ```
 
-One-dir produces `dist/EmailTriage/` (~128 MB) with a double-clickable
-`EmailTriage.exe` beside its `_internal` folder. One-file folds that whole folder
-into a single 58 MB exe. Either way everything is bundled — Python, ONNX Runtime,
-the encoder, `concerns.json` — and the target machine needs **no Python and no
-internet**.
+One-dir produces `dist/EmailTriage/` with a double-clickable `EmailTriage.exe`
+beside its `_internal` folder. One-file folds that folder into one executable.
+Either way Python, Tk, and the JSON rule resources are bundled, so the target
+machine needs **no Python and no internet**.
 
 Pick one-file for handing someone a single artifact; pick one-dir when startup
 latency matters or the endpoint blocks self-extracting exes. The bootloader
-unpacks one-file to a temp dir on **every** launch, so cold start is ~4 s against
-roughly instant for one-dir. Both resolve resources through `sys._MEIPASS` and
+unpacks one-file to a temp dir on **every** launch. Both resolve resources through `sys._MEIPASS` and
 both write `data/dataset.jsonl` next to the real exe, so on-disk behaviour is
 identical.
 
 The build script runs the frozen binary's self-test from a temp directory before
 declaring success, because a build that merely produces an `.exe` is not
-evidence that the model came along with it.
+evidence that its config and extraction resources came along with it.
 
 ```bash
 dist/EmailTriage/EmailTriage.exe --selftest     # writes selftest.json, exit 0/1
 ```
 
 That flag is also the field diagnostic for "it won't start on this machine" —
-it reports the interpreter, whether resources resolved, whether the embedding
-layer loaded, and a full traceback on failure.
+it reports the interpreter, whether resources resolved, the active layers, and
+a full traceback on failure.
 
 **Scope:** this freezes `email_triage_ui`, the teaching harness. The library a
 host system imports stays a wheel — a frozen exe cannot be imported by another
@@ -153,28 +115,26 @@ Notes:
 
 ## How it works
 
-Three layers vote, weighted, over one JSON config:
+Two deterministic layers vote, weighted, over one JSON config:
 
 | Layer | Weight | What it does | Cost |
 |---|---|---|---|
-| Structural | 0.10 | Regex detectors: claim numbers, amounts, dates, NPIs | ~0 |
-| Rules | 0.30 | Weighted keywords; `decisive` phrases short-circuit | ~0 |
-| Embeddings | 0.60 | MiniLM int8 ONNX, cosine vs per-concern prototypes | 23 MB, ~20 ms |
+| Structural | 0.25 | Regex detectors: claim numbers, amounts, dates, NPIs | ~0 |
+| Rules | 0.75 | Weighted keywords; `decisive` phrases override ranking | ~0 |
 
-Layer 3 is why **adding a concern type needs no training**. You describe the
-concern in plain English in `concerns.json`; classification is cosine similarity
-against that description. See `tests/test_add_concern.py` — it adds a whole new
-concern type with zero code and asserts it classifies.
+Adding a concern type still needs no Python change or training job, but it does
+require explicit phrase rules. See `tests/test_add_concern.py`: it adds a concern
+through JSON and asserts that the configured rules classify it.
 
 ### Two levels: concern, then reason
 
 **Concern** is what the item is about (Bill Status, Claim Information). **Reason**
-is the sub-classification within it, scored by the same engine but rules-led --
-reasons are stock phrases stated near-verbatim, not paraphrases.
+is the sub-classification within it, scored by the same rule engine. Reasons are
+stock phrases stated near-verbatim, not paraphrases.
 
-A reason is emitted **only when wording supports it**. Softmax always hands its
-mass to something, so without that guard an ordinary "what is the status of this
-bill?" gets labelled "not a bill on file". No supporting wording, no reason.
+A reason is emitted **only when an explicit rule supports it**. An ordinary
+"what is the status of this bill?" therefore does not get a disposition invented
+for it. No supporting wording, no reason.
 
 ### Fields that share a regex must require a label
 
@@ -183,13 +143,6 @@ Prov TIN are all digit runs. Those fields set `require_label: true`, so they
 accept only label-anchored values and report nothing otherwise. An unattributable
 match is worse than a gap -- assigning the first date in the body to all three
 date fields is a silent, confident error.
-
-### Two behaviours that look like bugs but are not
-
-**Evidence shrinkage.** `confidence = fused × min(1, (prototypes + examples) / 4)`.
-A concern authored with one prototype caps at 25% confidence and always routes to
-human review until you flesh it out. A data-starved classifier that guesses
-confidently is the worst failure mode available; this makes thinness visible.
 
 **A missing required field never changes the label.** It sets `needs_review`,
 lowers confidence, and lists the gap in `missing_fields`. Silently relabelling
@@ -203,7 +156,7 @@ Two different actions, often confused:
 |---|---|---|
 | Fix a wrong label on one email | Teach bar → pick the right concern/reason → **Save to dataset** | One labelled row. Does not change behaviour by itself. |
 | Name a category the taxonomy lacks | Teach bar → **`+ new concern...`** → type the name | Row is flagged `is_new_taxonomy`. Still cannot be predicted. |
-| Make the engine actually predict it | `--scaffold`, then write prototypes into `concerns.json` | The engine can now classify it. |
+| Make the engine actually predict it | `--scaffold`, then write phrase rules into `concerns.json` | The engine can now classify matching wording. |
 
 The dropdown can only offer what `concerns.json` contains — that is why
 `__other__` used to be the only escape hatch. Picking **`+ new concern...`** (or
@@ -234,19 +187,14 @@ below for why.
 ## Adding a concern type
 
 This is the step that changes behaviour. Nothing in the UI can substitute for
-it: a concern becomes predictable when it has **prototypes**, because Layer 3
-classifies by cosine similarity against those descriptions.
+it: a concern becomes predictable only when it has explicit positive rules and,
+where necessary, negative and decisive rules.
 
-`--scaffold` gives you everything except the thinking — id, display name,
-`draft: true`, and empty `prototypes` / `examples` arrays. Those two stay empty
-on purpose:
-
-- **Prototypes cannot be derived from a label.** They are the descriptions the
-  encoder embeds. A block auto-filled with none would classify nothing while
-  looking finished.
-- **Examples must not come from the dataset.** `dataset.jsonl` holds real email
-  text; `concerns.json` is committed to git. Write realistic phrasings with
-  fake identifiers instead.
+`--scaffold` gives you everything except the judgment: id, display name,
+`draft: true`, and empty rule collections. They stay empty because a label alone
+cannot establish which wording is safe, decisive, or likely to collide with
+another concern. Do not copy real text from `dataset.jsonl` into committed JSON;
+derive generalized rules and test them with synthetic identifiers.
 
 `draft: true` makes `check-config` warn until you take it out, so an unfinished
 concern is visible rather than silently inert.
@@ -259,15 +207,15 @@ PYTHONPATH=src py -3.14 -m email_triage check-config    # from a bare checkout
 py -3.14 -m email_triage check-config                   # after pip install -e .
 ```
 
-Write **prototypes** as descriptions of what the sender wants, not as keywords —
-they are embedded and compared semantically. Reference regexes from
-`patterns.library.json` by `pattern_ref`; do not write regex in `concerns.json`.
+Write strong positive phrases, collision-preventing negative phrases, and use
+decisive phrases sparingly. Reference regexes from `patterns.library.json` by
+`pattern_ref`; do not write regex in `concerns.json`.
 
 ## The UI is for teaching, not for shipping
 
 `run_ui.py` opens a window that takes a pasted subject and body and shows the
 concern, the extracted fields, the per-layer scores, and the JSON. **Its only
-job is teaching the model.** It is not the integration path and it is not meant
+job is reviewing and improving the rules.** It is not the integration path and it is not meant
 to sit in anyone's daily workflow — your app calls `classify_email` directly.
 
 The part that matters is the **Teach** bar at the bottom. Correcting a
@@ -291,16 +239,15 @@ rows are the labelled dataset that tunes or trains the next version.
 
 Filter on `verified_by_human` to get the human-confirmed subset;
 `was_prediction_correct: false` gives you the error set to analyse first; and
-`is_new_taxonomy: true` separates "the model got this wrong" from "we have
+`is_new_taxonomy: true` separates "the engine got this wrong" from "we have
 never modelled this at all", which are different problems with different fixes.
 
 ## Privacy
 
 Real emails carry claimant PII/PHI.
 
-- No network call at inference. `tokenizers` is loaded via `Tokenizer.from_file`,
-  so `huggingface_hub` and `requests` are never imported.
-- ONNX Runtime telemetry is disabled explicitly; the CPU provider is pinned.
+- No network call or model runtime exists in the inference path.
+- The engine package uses only the Python standard library.
 - `data/` and all `*.jsonl` are gitignored. **`data/dataset.jsonl` contains real
   email text — it must stay on the local machine.**
 - All test fixtures are synthetic and all identifiers in this repo are invented.
@@ -311,12 +258,12 @@ Real emails carry claimant PII/PHI.
 src/email_triage/          THE ENGINE - this is what a host app imports
   api.py           classify_email / classify_emails   <- the stable contract
   engine.py        fusion, decision ladder, TriageEngine
-  layers.py        the three scoring layers
+  layers.py        structural and rule scoring
   extract.py       field extraction + normalizers
   textprep.py      normalization, thread split, signature detection
   config.py        loads + compiles concerns.json
   render.py        plain text, JSON, training records
-  resources/       concerns.json, patterns.library.json, model/
+  resources/       concerns.json, patterns.library.json
   __main__.py      CLI: check-config, classify   (no tkinter in this package)
 
 src/email_triage_ui/       THE TEACHING WINDOW - optional, never shipped to a host
@@ -325,7 +272,6 @@ src/email_triage_ui/       THE TEACHING WINDOW - optional, never shipped to a ho
   proposals.py     what reviewers asked for that the taxonomy lacks (--proposals)
   selftest.py      headless bundle diagnostic (--selftest)
 
-scripts/fetch_model.py
 tests/
 pipeline.md        active work items
 ```
@@ -335,9 +281,7 @@ the reverse.
 
 ## Interpreter
 
-This machine has **two** Python 3.14 installs. `C:\Python314\python.exe` is on
-PATH but lacks onnxruntime; `py -3.14` resolves to the pythoncore install that
-has it. **Always use `py -3.14`**, never bare `python`.
+Development commands use `py -3.14` on this Windows checkout for consistency.
 
 Source targets 3.11+ (`ruff target-version = py311`) because end-user machines
 are locked down and their interpreter version is not yet known.

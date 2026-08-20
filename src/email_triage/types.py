@@ -64,11 +64,9 @@ class LayerScore:
     """Per-layer contribution for one concern. This is the teaching signal."""
 
     concern_id: str
-    embedding: float = 0.0
     rules: float = 0.0
     structural: float = 0.0
     fused: float = 0.0
-    saturation: float = 1.0
     decisive_hits: tuple[str, ...] = ()
     keyword_hits: tuple[str, ...] = ()
     gate_satisfied: bool = True

@@ -56,7 +56,6 @@ def selftest() -> int:
         report["resources_exist"] = RESOURCES.is_dir()
 
         eng = TriageEngine()
-        report["embeddings_active"] = eng.embeddings_active
         report["layers"] = list(eng.layers_used)
         report["concern_ids"] = list(eng.concern_ids)
 

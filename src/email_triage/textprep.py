@@ -60,7 +60,7 @@ class PreparedText:
 
     @property
     def classify_text(self) -> str:
-        """What the embedding and rule layers score. Newest message only."""
+        """What the rule layer scores. Newest message only."""
         parts = [s.text for s in self.segments
                  if s.kind in (Segment.SUBJECT.value, Segment.NEWEST_BODY.value)]
         return "\n".join(p for p in parts if p.strip())

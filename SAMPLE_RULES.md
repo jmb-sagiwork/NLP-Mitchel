@@ -48,8 +48,8 @@ these 15 emails and scores it against columns D-L.
 | DOB | 4 / 4 | **4 / 4** |
 | Routed to review | 9 / 15 | 5 / 15 |
 
-No field is wrong or missed on any sample. Measured with the embedding model
-absent (rules + structure only), so these are the floor, not the ceiling.
+No field is wrong or missed on any sample. This fork always runs rules and
+structure only.
 
 ### Required fields
 

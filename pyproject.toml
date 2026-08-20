@@ -10,8 +10,6 @@ requires-python = ">=3.11,<3.15"
 dependencies = []
 
 [project.optional-dependencies]
-# Layer 3. The engine runs without these on rules + structural only.
-embeddings = ["onnxruntime>=1.24", "numpy>=1.26", "tokenizers>=0.19"]
 # Optional convenience only. Never import at module scope.
 frames = ["pandas>=2.0"]
 dev = ["pytest>=8", "ruff>=0.6"]
@@ -27,7 +25,7 @@ email-triage-ui = "email_triage_ui.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-email_triage = ["resources/*.json", "resources/model/*"]
+email_triage = ["resources/*.json"]
 
 [tool.ruff]
 # Source must stay compatible with the oldest supported interpreter,

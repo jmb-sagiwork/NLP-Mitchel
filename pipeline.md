@@ -1,5 +1,10 @@
 # Email Triage NLP Pipeline
 
+> Rules-only fork note: this file is the original project's historical work
+> log, so completed entries below still describe the former embedding design.
+> The active implementation, packaging, and tests in this fork contain only
+> deterministic regex, structural, and phrase-rule logic.
+
 This is the active work-item pipeline for the Email Triage NLP module (email body → concern classification → field extraction).
 
 **Scope, as of 08/17/2026:** this repo builds a **library**, not a mail client. The input is two strings — subject and body — handed in by whatever host application owns the mailbox:

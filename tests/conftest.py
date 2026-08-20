@@ -12,12 +12,11 @@ from email_triage.engine import TriageEngine  # noqa: E402
 
 @pytest.fixture(scope="session")
 def engine() -> TriageEngine:
-    """Full engine, embeddings if the model is present."""
+    """The production rules + structural engine."""
     return TriageEngine()
 
 
 @pytest.fixture(scope="session")
 def rules_engine() -> TriageEngine:
-    """Deterministic layers only. Every assertion here must hold offline and
-    with no model file, which is the guaranteed-available configuration."""
-    return TriageEngine(enable_embeddings=False)
+    """Compatibility fixture name for tests written around the rules engine."""
+    return TriageEngine()

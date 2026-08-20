@@ -1,22 +1,20 @@
 {
- "config_version": "0.4.2",
- "schema_version": "1.1.0",
+ "config_version": "0.5.0",
+ "schema_version": "1.2.0",
  "updated": "2026-08-19",
  "_TAXONOMY_SOURCE": "Concerns, reasons and the seven extraction fields come from the user's operational list. Two levels: CONCERN is what the item is about (Bill Status, Claim Information); REASON is the sub-classification within it. 0.3.0 applied the rules derived from 15 real inbound emails - see SAMPLE_RULES.md and samples.xlsx column M.",
  "_OPEN_QUESTION": "SETTLED 2026-08-19 against 15 real emails: the reasons ARE dispositions, recorded after an agent looks the bill up, and inbound mail states none of them. Reason was blank on 14 of 15 samples; the only one that fired was 'Claim number request', which is the sole reason phrased as a request. Reason output is therefore ADVISORY. Concern and field extraction are the reliable outputs. Re-cutting reasons into things an email can actually say is still open - see SAMPLE_RULES.md Finding 1.",
  "_FIELD_REQUIREDNESS_ASSUMPTION": "RESOLVED 2026-08-19 by the user: on Bill Status, claim_id, date_of_service and expected_amount are REQUIRED - these are the three an agent cannot action a bill without. Everything else stays optional. On Claim Information nothing is required, because that concern is the sender asking to BE GIVEN the claim number; requiring it would flag every such email by definition.",
  "_HOW_TO_ADD_A_CONCERN": [
   "1. Copy a block in 'concerns', give it a new unique 'id' and 'display_name'.",
-  "2. Write 3-5 'prototypes': plain-English sentences describing what the sender wants.",
-  "   These are embedded and compared semantically. Descriptions, not keywords.",
-  "3. Add 'examples': short realistic phrasings (identifiers faked, never real PHI).",
-  "4. Add 'keyword_rules.positive' phrases that are strong giveaways.",
+  "2. Add 'keyword_rules.positive' phrases that are strong giveaways.",
+  "3. Add negative phrases for common collisions with another concern.",
+  "4. Add a decisive phrase only when it unambiguously identifies this concern.",
   "5. List 'fields'. Reference a regex by 'pattern_ref' - never write regex here.",
   "   Set 'require_label': true whenever the pattern is shared with another field.",
-  "6. Optionally add 'reasons' for sub-classification, same prototype/keyword shape.",
-  "7. Run: python -m email_triage check-config",
-  "NOTE: confidence is shrunk when a concern has fewer than 4 prototypes+examples,",
-  "so a thin concern always routes to review until fleshed out (pipeline SP-1.1-20)."
+  "6. Optionally add 'reasons' for sub-classification using the same rule shape.",
+  "7. Run: python -m email_triage check-config and the test suite.",
+  "NOTE: this engine is rules-only; new wording must be represented explicitly."
  ],
  "defaults": {
   "thresholds": {
@@ -27,12 +25,9 @@
    "reason_accept": 0.45
   },
   "fusion_weights": {
-   "embedding": 0.6,
-   "rules": 0.3,
-   "structural": 0.1
+   "rules": 0.75,
+   "structural": 0.25
   },
-  "embedding_temperature": 0.05,
-  "evidence_saturation_k": 4,
   "search_quoted_history": true,
   "history_decay": 0.9,
   "segment_weights": {
@@ -41,18 +36,6 @@
    "signature": 0.3,
    "quoted_history": 0.55
   }
- },
- "background_class": {
-  "id": "__other__",
-  "display_name": "Other / not a tracked concern",
-  "prototypes": [
-   "Thanks, received. I will get back to you shortly.",
-   "Please see the attached document for your records.",
-   "Scheduling a meeting to discuss this next week.",
-   "I am out of the office and will return on Monday.",
-   "Automated notification: your request has been processed.",
-   "Acknowledging receipt of your message below."
-  ]
  },
  "_SHARED_FIELDS_NOTE": "DOS, DOI and DOB all resolve to the us_date pattern, and claim_id / patient_account / provider_tin all match digit runs. Every one of them sets require_label:true - without it the first date in the body would be assigned to all three date fields. See pipeline SP-1.1-38.",
  "concerns": [
@@ -63,28 +46,6 @@
    "draft": false,
    "priority": 10,
    "description_internal": "Sender is asking about the status or disposition of a submitted bill on a claim - whether it processed, was denied, or cannot be located.",
-   "prototypes": [
-    "The sender is asking for the current status of a bill submitted on a workers compensation claim.",
-    "A provider wants to know whether a submitted bill has finished processing and what the outcome was.",
-    "Follow up asking why a bill was denied or reduced after processing.",
-    "The sender cannot find a submitted bill in the system and is asking whether it was received.",
-    "Request for an update on where a bill stands for a given date of service.",
-    "The sender wants a copy of the explanation of benefits or explanation of review for a bill that was already submitted.",
-    "Follow up asking whether an appeal or reconsideration that was mailed has been received and processed.",
-    "A provider is asking when payment will be issued and for the check number, check date and check amount.",
-    "Request to confirm that a submitted bill or claim was received on file, and to be told the date it was received."
-   ],
-   "examples": [
-    "Can you check the status of the bill for claim WC1234567, DOS 03/14/2026?",
-    "Following up on this bill - has it completed processing yet?",
-    "We never received a response on this bill. Was it ever received on file?",
-    "Please advise the disposition of the charge submitted for this claim.",
-    "Can you please provide us with a copy of the EOB for the date of service below?",
-    "Please confirm that the following appeal was received.",
-    "Can you provide status of the attached appeal that was mailed last month?",
-    "When can we anticipate payment? If payment has been issued please provide the check number.",
-    "Please provide the date of receipt and a status update for the bill listed below."
-   ],
    "keyword_rules": {
     "positive": [
      {
@@ -297,13 +258,6 @@
     {
      "id": "completed_processing",
      "display_name": "Completed processing",
-     "prototypes": [
-      "The bill finished processing and an outcome was issued.",
-      "Processing is complete on this bill and payment was determined."
-     ],
-     "examples": [
-      "This bill has completed processing."
-     ],
      "keyword_rules": {
       "positive": [
        {
@@ -331,13 +285,6 @@
     {
      "id": "completed_processing_denied",
      "display_name": "Completed processing and denied",
-     "prototypes": [
-      "The bill finished processing and the charge was denied.",
-      "Processing completed with a denial on the submitted charge."
-     ],
-     "examples": [
-      "Completed processing and denied."
-     ],
      "keyword_rules": {
       "positive": [
        {
@@ -367,13 +314,6 @@
     {
      "id": "not_a_bill_on_file",
      "display_name": "Not a bill on file",
-     "prototypes": [
-      "No bill matching this claim and date of service exists in the system.",
-      "The submitted bill was never received and is not on file."
-     ],
-     "examples": [
-      "Not a bill on file for this claim."
-     ],
      "keyword_rules": {
       "positive": [
        {
@@ -415,13 +355,6 @@
     {
      "id": "no_claim_on_file_missing_information",
      "display_name": "No claim on file; Missing Information",
-     "prototypes": [
-      "No claim exists on file and required information is missing to proceed.",
-      "The claim could not be located and the request lacks the details needed to act."
-     ],
-     "examples": [
-      "No claim on file; missing information."
-     ],
      "keyword_rules": {
       "positive": [
        {
@@ -619,19 +552,6 @@
    "draft": false,
    "priority": 20,
    "description_internal": "Sender needs claim-level information rather than a bill outcome - most commonly the claim number itself.",
-   "prototypes": [
-    "The sender is asking for the claim number associated with a patient or date of injury.",
-    "A provider needs the claim identifier before they can submit or resubmit a bill.",
-    "The sender does not have a claim number and is asking what it is.",
-    "The sender has no claim number at all and is asking to be told what it is for a named patient.",
-    "A new injury has been reported and the provider is asking which claim number to bill against."
-   ],
-   "examples": [
-    "Can you provide the claim number for this patient, DOI 01/09/2026?",
-    "We need the claim number before we can bill. Patient account ACCT-99213.",
-    "Requesting the claim ID on file for this date of injury.",
-    "If able, please provide a claim number for the following patient."
-   ],
    "keyword_rules": {
     "positive": [
      {
@@ -748,13 +668,6 @@
     {
      "id": "claim_number_request",
      "display_name": "Claim number request",
-     "prototypes": [
-      "The sender is asking to be given the claim number.",
-      "Request to look up and return the claim identifier for a patient."
-     ],
-     "examples": [
-      "Claim number request."
-     ],
      "keyword_rules": {
       "positive": [
        {

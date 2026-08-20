@@ -106,11 +106,11 @@ def to_plain_text(result: TriageResult) -> str:
     add("-" * 62)
     add(f"Layers used: {', '.join(result.explanation.layers_used)}")
     add("")
-    add(f"  {'concern':<24} {'emb':>6} {'rule':>6} {'struct':>7} {'fused':>7} {'sat':>5}")
+    add(f"  {'concern':<24} {'rule':>6} {'struct':>7} {'fused':>7}")
     for s in result.explanation.scores:
         add(
-            f"  {s.concern_id:<24} {s.embedding:>6.3f} {s.rules:>6.3f} "
-            f"{s.structural:>7.3f} {s.fused:>7.3f} {s.saturation:>5.2f}"
+            f"  {s.concern_id:<24} {s.rules:>6.3f} "
+            f"{s.structural:>7.3f} {s.fused:>7.3f}"
             + ("" if s.gate_satisfied else "  (gate failed)")
         )
     add("")
@@ -161,15 +161,11 @@ _DECISION_GLOSS = {
 }
 
 _LAYER_GLOSS = (
-    "  emb    embedding  - MiniLM similarity between this email and the concern's\n"
-    "                      prototype sentences\n"
     "  rule   keywords   - weighted phrases from the concern's keyword_rules,\n"
     "                      squashed to 0..1\n"
     "  struct structure  - whether the identifiers the concern expects (claim id,\n"
     "                      and so on) are present\n"
-    "  fused             - the three above combined by the configured weights\n"
-    "  sat    saturation - evidence shrinkage: a concern with few prototypes is\n"
-    "                      capped low on purpose"
+    "  fused             - the two scores above combined by the configured weights"
 )
 
 _DEFAULT_THRESHOLDS = {
@@ -184,7 +180,6 @@ def to_explanation_text(
     result: TriageResult,
     *,
     thresholds: dict[str, float] | None = None,
-    embeddings_active: bool = True,
 ) -> str:
     """Narrate the decision: what won, what it beat, and what would flip it.
 
@@ -231,8 +226,8 @@ def to_explanation_text(
             for h in top.keyword_hits:
                 add(f'  - "{h}"')
         else:
-            add("Supporting keywords: none. This concern was carried by the")
-            add("  embedding layer alone.")
+            add("Supporting keywords: none. Structural evidence alone was not")
+            add("  enough to produce a confident classification.")
         add("")
         add(
             "Structural gate: "
@@ -249,22 +244,16 @@ def to_explanation_text(
     # ---- 2. the scoring table --------------------------------------------
     add("How the concerns scored (ranked, highest first):")
     add("")
-    add(f"  {'concern':<30} {'emb':>6} {'rule':>6} {'struct':>7} {'fused':>7} {'sat':>5}")
+    add(f"  {'concern':<30} {'rule':>6} {'struct':>7} {'fused':>7}")
     for s in ex.scores:
         add(
-            f"  {s.concern_id:<30} {s.embedding:>6.3f} {s.rules:>6.3f} "
-            f"{s.structural:>7.3f} {s.fused:>7.3f} {s.saturation:>5.2f}"
+            f"  {s.concern_id:<30} {s.rules:>6.3f} "
+            f"{s.structural:>7.3f} {s.fused:>7.3f}"
             + ("" if s.gate_satisfied else "   (gate failed)")
         )
     add("")
     add(_LAYER_GLOSS)
     add("")
-    if not embeddings_active:
-        add("NOTE: the embedding layer is not loaded, so 'emb' is 0.000 on every")
-        add("      row and confidence is capped at 70%. Rules and structure are")
-        add("      carrying the whole decision.")
-        add("")
-
     # ---- 3. what it beat, and by how much ---------------------------------
     if len(ex.scores) > 1:
         runner = ex.scores[1]
@@ -287,10 +276,9 @@ def to_explanation_text(
         rule()
         for chunk in _wrap(
             "The reason is a sub-classification INSIDE the concern above. It is "
-            "scored rules-first, with embeddings only breaking ties, because "
-            "reasons are stock dispositions stated near-verbatim rather than "
-            "paraphrased. Concern-level weights here would let the encoder invent "
-            "a disposition the email never mentions.",
+            "scored only from explicit configured phrases. Reasons are stock "
+            "dispositions stated near-verbatim, so unsupported wording never "
+            "invents a disposition the email does not mention.",
             66,
         ):
             add(f"  {chunk}")
@@ -363,7 +351,7 @@ def to_explanation_text(
     change_section = 4 if result.reason_id else 3
     add(f"{change_section}. WHAT WOULD CHANGE THIS ANSWER")
     rule()
-    for item in _what_would_change(result, t, embeddings_active):
+    for item in _what_would_change(result, t):
         wrapped = _wrap(item, 64)
         add(f"  * {wrapped[0]}")
         for chunk in wrapped[1:]:
@@ -378,9 +366,7 @@ def to_explanation_text(
     return "\n".join(lines)
 
 
-def _what_would_change(
-    result: TriageResult, t: dict[str, float], embeddings_active: bool
-) -> list[str]:
+def _what_would_change(result: TriageResult, t: dict[str, float]) -> list[str]:
     """The actionable half: the specific edit that would move this decision."""
     out: list[str] = []
     ex = result.explanation
@@ -392,7 +378,7 @@ def _what_would_change(
         )
     if ex.reason in ("low_margin", "low_confidence", "below_review_threshold"):
         out.append(
-            "Adding prototypes or keyword phrases to the intended concern in "
+            "Adding keyword phrases to the intended concern in "
             "concerns.json is the fix here - the gap is evidence, not thresholds."
         )
     if result.missing_fields:
@@ -408,21 +394,10 @@ def _what_would_change(
             + " had competing values within the ambiguity delta. Labelling the "
             "intended one in the source text disambiguates it."
         )
-    if ex.scores and ex.scores[0].saturation < 1.0:
-        out.append(
-            "This concern is still evidence-shrunk: it has fewer prototypes and "
-            "examples than the saturation target, so it cannot reach high "
-            "confidence no matter how well it matches. Add examples."
-        )
     if ex.scores and not ex.scores[0].gate_satisfied:
         out.append(
             "The structural gate failed. Including the identifier this concern "
             "expects would remove the penalty applied to its score."
-        )
-    if not embeddings_active:
-        out.append(
-            "The embedding model is not loaded. Restoring it turns the strongest of "
-            "the three layers back on and lifts the 70% confidence cap."
         )
     if not out:
         out.append(
@@ -496,7 +471,7 @@ def build_training_record(
     rows group correctly, and are echoed under `label.proposed_*` so a later
     pass can tell "you got bill_status wrong" apart from "this is a category
     we have never modelled". A proposal is not a prediction the engine can
-    make - it only becomes one once someone writes prototypes for it in
+    make - it only becomes one once someone writes explicit rules for it in
     concerns.json.
     """
     predicted = result.concern_id

@@ -107,15 +107,9 @@ class CompiledReason:
 
     id: str
     display_name: str
-    prototypes: tuple[str, ...]
-    examples: tuple[str, ...]
     positive: tuple[KeywordRule, ...]
     negative: tuple[KeywordRule, ...]
     decisive: tuple[tuple[str, ...], ...]
-
-    @property
-    def evidence_count(self) -> int:
-        return len(self.prototypes) + len(self.examples)
 
 
 @dataclass(frozen=True)
@@ -126,8 +120,6 @@ class CompiledConcern:
     draft: bool
     priority: int
     description_internal: str
-    prototypes: tuple[str, ...]
-    examples: tuple[str, ...]
     positive: tuple[KeywordRule, ...]
     negative: tuple[KeywordRule, ...]
     decisive: tuple[tuple[str, ...], ...]
@@ -139,10 +131,6 @@ class CompiledConcern:
     # Declaring them lets extraction keep the pairing instead of flattening it
     # into two independent lists (SP-1.1-61).
     line_item_fields: tuple[str, ...] = ()
-
-    @property
-    def evidence_count(self) -> int:
-        return len(self.prototypes) + len(self.examples)
 
     @property
     def required_field_names(self) -> tuple[str, ...]:
@@ -161,14 +149,9 @@ class Config:
     schema_version: str
     thresholds: dict[str, float]
     fusion_weights: dict[str, float]
-    embedding_temperature: float
-    evidence_saturation_k: int
     search_quoted_history: bool
     history_decay: float
     segment_weights: dict[str, float]
-    background_id: str
-    background_display_name: str
-    background_prototypes: tuple[str, ...]
     concerns: tuple[CompiledConcern, ...]
     patterns: dict[str, CompiledPattern] = field(default_factory=dict)
 
@@ -319,8 +302,6 @@ def _compile_reason(spec: dict[str, Any], concern_id: str) -> CompiledReason:
     return CompiledReason(
         id=rid,
         display_name=spec.get("display_name", rid),
-        prototypes=tuple(str(p) for p in spec.get("prototypes", [])),
-        examples=tuple(str(e) for e in spec.get("examples", [])),
         positive=tuple(_compile_keyword(r, f"{concern_id}.{rid}")
                        for r in rules.get("positive", [])),
         negative=tuple(_compile_keyword(r, f"{concern_id}.{rid}")
@@ -374,8 +355,6 @@ def _compile_concern(spec: dict[str, Any], patterns: dict[str, CompiledPattern])
         draft=bool(spec.get("draft", False)),
         priority=int(spec.get("priority", 100)),
         description_internal=spec.get("description_internal", ""),
-        prototypes=tuple(str(p) for p in spec.get("prototypes", [])),
-        examples=tuple(str(e) for e in spec.get("examples", [])),
         positive=own_positive + rolled,
         negative=tuple(_compile_keyword(r, cid) for r in rules.get("negative", [])),
         decisive=tuple(decisive),
@@ -402,7 +381,6 @@ def load_config(
         raise ConfigError(f"concerns config is not valid JSON: {exc}") from exc
 
     defaults = data.get("defaults") or {}
-    bg = data.get("background_class") or {}
     concerns = tuple(_compile_concern(c, patterns) for c in data.get("concerns", []))
     if not concerns:
         raise ConfigError("concerns config declares no concerns")
@@ -414,7 +392,7 @@ def load_config(
         seen.add(c.id)
 
     weights = dict(defaults.get("fusion_weights") or {})
-    for key in ("embedding", "rules", "structural"):
+    for key in ("rules", "structural"):
         weights.setdefault(key, 0.0)
 
     return Config(
@@ -428,8 +406,6 @@ def load_config(
             **(defaults.get("thresholds") or {}),
         },
         fusion_weights=weights,
-        embedding_temperature=float(defaults.get("embedding_temperature", 0.05)),
-        evidence_saturation_k=int(defaults.get("evidence_saturation_k", 4)),
         search_quoted_history=bool(defaults.get("search_quoted_history", True)),
         history_decay=float(defaults.get("history_decay", 0.9)),
         segment_weights={
@@ -439,9 +415,6 @@ def load_config(
             "quoted_history": 0.55,
             **(defaults.get("segment_weights") or {}),
         },
-        background_id=str(bg.get("id", "__other__")),
-        background_display_name=str(bg.get("display_name", "Other")),
-        background_prototypes=tuple(str(p) for p in bg.get("prototypes", [])),
         concerns=concerns,
         patterns=patterns,
     )
@@ -452,19 +425,13 @@ def check_config() -> list[str]:
     warnings: list[str] = []
     cfg = load_config()
     for c in cfg.concerns:
-        if c.evidence_count < cfg.evidence_saturation_k:
-            warnings.append(
-                f"{c.id}: only {c.evidence_count} prototypes+examples "
-                f"(< {cfg.evidence_saturation_k}); confidence will be shrunk to "
-                f"{c.evidence_count / cfg.evidence_saturation_k:.0%} and always route to review"
-            )
         if c.draft:
             warnings.append(f"{c.id}: marked draft=true; replace with the real taxonomy")
         if not c.fields:
             warnings.append(f"{c.id}: declares no fields, so nothing will be extracted")
         if not c.required_field_names:
             warnings.append(f"{c.id}: has no required fields; completeness cannot be checked")
-    total = sum(cfg.fusion_weights.get(k, 0.0) for k in ("embedding", "rules", "structural"))
+    total = sum(cfg.fusion_weights.get(k, 0.0) for k in ("rules", "structural"))
     if abs(total - 1.0) > 1e-6:
         warnings.append(f"fusion_weights sum to {total:.3f}, expected 1.0")
     return warnings

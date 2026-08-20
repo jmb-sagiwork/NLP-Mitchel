@@ -10,7 +10,7 @@ __version__ = "0.1.2"
 
 from .api import classify_email, classify_emails  # noqa: E402
 from .engine import TriageEngine, get_default_engine  # noqa: E402
-from .errors import ConfigError, ModelUnavailable, TriageError  # noqa: E402
+from .errors import ConfigError, TriageError  # noqa: E402
 from .render import (  # noqa: E402
     append_training_record,
     build_training_record,
@@ -36,5 +36,4 @@ __all__ = [
     "slugify_label",
     "TriageError",
     "ConfigError",
-    "ModelUnavailable",
 ]

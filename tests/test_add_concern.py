@@ -18,7 +18,7 @@ def test_new_concern_type_needs_only_a_json_edit(tmp_path):
     shutil.copy(PATTERNS_PATH, tmp_path / "patterns.library.json")
     cfg = json.loads(CONCERNS_PATH.read_text(encoding="utf-8"))
 
-    before = TriageEngine(config_path=CONCERNS_PATH, enable_embeddings=False)
+    before = TriageEngine(config_path=CONCERNS_PATH)
     assert "mileage_reimbursement" not in before.concern_ids
 
     # Everything below is data. No Python is written to teach the new concern.
@@ -27,15 +27,6 @@ def test_new_concern_type_needs_only_a_json_edit(tmp_path):
         "display_name": "Mileage Reimbursement",
         "enabled": True,
         "priority": 50,
-        "prototypes": [
-            "The sender is requesting reimbursement for travel mileage to a medical appointment.",
-            "A claimant asks to be paid back for miles driven to treatment.",
-            "Question about a mileage reimbursement request on a claim.",
-        ],
-        "examples": [
-            "Submitting mileage reimbursement for claim WC1234567, 42 miles on 03/14/2026.",
-            "When will my mileage reimbursement be paid for this claim?",
-        ],
         "keyword_rules": {
             "positive": [
                 {"phrase": "mileage reimbursement", "weight": 4.0},
@@ -72,7 +63,7 @@ def test_new_concern_type_needs_only_a_json_edit(tmp_path):
     new_path = tmp_path / "concerns.json"
     new_path.write_text(json.dumps(cfg), encoding="utf-8")
 
-    after = TriageEngine(config_path=new_path, enable_embeddings=False)
+    after = TriageEngine(config_path=new_path)
     assert "mileage_reimbursement" in after.concern_ids
 
     r = after.classify(
@@ -94,7 +85,7 @@ def test_disabling_a_concern_removes_it_from_scoring(tmp_path):
     p = tmp_path / "concerns.json"
     p.write_text(json.dumps(cfg), encoding="utf-8")
 
-    eng = TriageEngine(config_path=p, enable_embeddings=False)
+    eng = TriageEngine(config_path=p)
     assert "bill_status" not in eng.concern_ids
     r = eng.classify("Bill status for Claim ID WC1234567, DOS 03/14/2026.")
     assert r.concern_id != "bill_status"

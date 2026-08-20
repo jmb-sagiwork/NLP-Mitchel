@@ -79,7 +79,8 @@ def test_claim_information_has_its_reason():
 
 def test_fusion_weights_sum_to_one():
     cfg = load_config()
-    total = sum(cfg.fusion_weights[k] for k in ("embedding", "rules", "structural"))
+    assert set(cfg.fusion_weights) == {"rules", "structural"}
+    total = sum(cfg.fusion_weights[k] for k in ("rules", "structural"))
     assert total == pytest.approx(1.0)
 
 

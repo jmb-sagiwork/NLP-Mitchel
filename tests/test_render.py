@@ -72,7 +72,7 @@ def test_repeated_inquiries_render_every_value_and_pair(rules_engine):
     )
 
     plain = to_plain_text(r)
-    why = to_explanation_text(r, embeddings_active=False)
+    why = to_explanation_text(r)
     for value in ("2041-11-21", "2041-11-24", "357.00"):
         assert value in plain
         assert value in why
@@ -105,6 +105,4 @@ def test_stated_reason_still_appears_in_human_outputs(rules_engine):
     )
     assert r.reason_id == "completed_processing_denied"
     assert "Reason          : Completed processing and denied" in to_plain_text(r)
-    assert "2. REASON  ->  Completed processing and denied" in to_explanation_text(
-        r, embeddings_active=False
-    )
+    assert "2. REASON  ->  Completed processing and denied" in to_explanation_text(r)
