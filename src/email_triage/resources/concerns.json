@@ -570,7 +570,8 @@
       "charge",
       "charge was",
       "charge of",
-      "amount of"
+      "amount of",
+      "cpt"
      ],
      "normalizer": "money",
      "reject_prefix": [
@@ -897,7 +898,8 @@
       "charge",
       "charge was",
       "charge of",
-      "amount of"
+      "amount of",
+      "cpt"
      ],
      "normalizer": "money",
      "reject_prefix": [
