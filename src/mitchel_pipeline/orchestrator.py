@@ -14,6 +14,7 @@ EventCallback = Callable[[PipelineEvent], None]
 ExtractedCallback = Callable[[ExtractedEmail], None]
 NlpCallback = Callable[[dict[str, object]], None]
 ReplyCallback = Callable[[str], None]
+LayersCallback = Callable[[tuple[str, ...]], None]
 
 MANUAL_REVIEW_REPLY = (
     "To: Requestor\n"
@@ -59,6 +60,7 @@ class PipelineOrchestrator:
         on_extracted: ExtractedCallback | None = None,
         on_nlp: NlpCallback | None = None,
         on_reply: ReplyCallback | None = None,
+        on_layers: LayersCallback | None = None,
     ) -> None:
         self.extractor = extractor
         self.enable_minilm = enable_minilm
@@ -68,6 +70,7 @@ class PipelineOrchestrator:
         self.on_extracted = on_extracted or (lambda _email: None)
         self.on_nlp = on_nlp or (lambda _result: None)
         self.on_reply = on_reply or (lambda _reply: None)
+        self.on_layers = on_layers or (lambda _layers: None)
         self._progress = 0.0
 
     def _event(
@@ -100,6 +103,7 @@ class PipelineOrchestrator:
             engine = self.engine or TriageEngine(enable_embeddings=self.enable_minilm)
             if self.enable_minilm and not engine.embeddings_active:
                 self._event("status", "MiniLM unavailable; using rules", 3)
+            self.on_layers(getattr(engine, "layers_used", ()))
 
             extraction_total = 1
 

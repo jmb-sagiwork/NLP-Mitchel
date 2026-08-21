@@ -248,6 +248,25 @@ class MitchelApp:
     def _show_reply(self, reply: str) -> None:
         self._blocking_messagebox("Simulated email reply", reply)
 
+    def _show_layers(self, layers_used: tuple[str, ...]) -> None:
+        names = {
+            "embeddings": "MiniLM (embeddings)",
+            "structural": "Structural (required-field presence)",
+            "rules": "Rules (keyword matching)",
+        }
+        lines = [f"{len(layers_used)} of 3 layers are active for this run:", ""]
+        for layer in ("embeddings", "structural", "rules"):
+            mark = "ON " if layer in layers_used else "OFF"
+            lines.append(f"[{mark}] {names[layer]}")
+        if "embeddings" not in layers_used:
+            lines.append("")
+            lines.append(
+                "MiniLM is not active. Either 'Use MiniLM' was unchecked, or the "
+                "model files could not be loaded, so results are rules-only and "
+                "confidence is capped."
+            )
+        self._blocking_messagebox("NLP layers for this run", "\n".join(lines))
+
     def _sync_popup_options(self) -> None:
         if self.show_extracted_email.get():
             self.extracted_popup_enabled.set()
@@ -276,6 +295,7 @@ class MitchelApp:
             on_extracted=self._show_extracted,
             on_nlp=self._show_nlp,
             on_reply=self._show_reply,
+            on_layers=self._show_layers,
         )
 
         def run() -> None:
