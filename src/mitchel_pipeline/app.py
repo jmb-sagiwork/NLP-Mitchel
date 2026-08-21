@@ -152,6 +152,7 @@ class MitchelApp:
         self.progress = tk.DoubleVar(value=0)
         self.percent = tk.StringVar(value="0%")
         self.use_minilm = tk.BooleanVar(value=True)
+        self.skip_count = tk.StringVar(value="0")
         self.show_extracted_email = tk.BooleanVar(value=True)
         self.show_nlp_output = tk.BooleanVar(value=True)
         self.extracted_popup_enabled = threading.Event()
@@ -190,6 +191,18 @@ class MitchelApp:
             command=self._sync_popup_options,
         )
         self.nlp_check.pack(anchor="w")
+
+        skip_row = ttk.Frame(options)
+        skip_row.pack(anchor="w", fill="x", pady=(4, 0))
+        ttk.Label(skip_row, text="Skip first N emails:").pack(side="left")
+        self.skip_count_box = ttk.Combobox(
+            skip_row,
+            textvariable=self.skip_count,
+            values=("0", "1", "2", "3"),
+            state="readonly",
+            width=3,
+        )
+        self.skip_count_box.pack(side="left", padx=(6, 0))
 
         controls = ttk.Frame(frame)
         controls.pack(fill="x", pady=(8, 0))
@@ -287,6 +300,7 @@ class MitchelApp:
         self.start_button.configure(state="disabled")
         self.pause_button.configure(state="normal", text="Pause")
         self.minilm_check.configure(state="disabled")
+        self.skip_count_box.configure(state="disabled")
         self.extractor = IncontactExtractor(login_gate=self._manual_login_gate)
         orchestrator = PipelineOrchestrator(
             self.extractor,
@@ -296,6 +310,7 @@ class MitchelApp:
             on_nlp=self._show_nlp,
             on_reply=self._show_reply,
             on_layers=self._show_layers,
+            skip_count=int(self.skip_count.get() or 0),
         )
 
         def run() -> None:
@@ -349,6 +364,7 @@ class MitchelApp:
         self.pause_button.configure(state="disabled", text="Pause")
         self.start_button.configure(state="normal")
         self.minilm_check.configure(state="normal")
+        self.skip_count_box.configure(state="readonly")
         self.control = None
         self.extractor = None
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable, Iterable
 from typing import Protocol
 
@@ -61,6 +62,7 @@ class PipelineOrchestrator:
         on_nlp: NlpCallback | None = None,
         on_reply: ReplyCallback | None = None,
         on_layers: LayersCallback | None = None,
+        skip_count: int = 0,
     ) -> None:
         self.extractor = extractor
         self.enable_minilm = enable_minilm
@@ -71,6 +73,7 @@ class PipelineOrchestrator:
         self.on_nlp = on_nlp or (lambda _result: None)
         self.on_reply = on_reply or (lambda _reply: None)
         self.on_layers = on_layers or (lambda _layers: None)
+        self.skip_count = max(skip_count, 0)
         self._progress = 0.0
 
     def _event(
@@ -115,6 +118,11 @@ class PipelineOrchestrator:
                 self._event("progress", message, progress)
 
             emails = self.extractor.extract(control, extraction_progress)
+            if self.skip_count:
+                self._event(
+                    "status", f"Skipping first {self.skip_count} email(s)", 5
+                )
+                emails = itertools.islice(emails, self.skip_count, None)
             for email_index, email in enumerate(emails, start=1):
                 control.checkpoint()
                 total = max(extraction_total, email_index)
