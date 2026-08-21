@@ -60,6 +60,10 @@ OUTCOME_MESSAGE = (
 MAX_ITERATIONS = 500
 HISTORY_TAB_READY_TIMEOUT = 25.0
 MINIMUM_SUCCESSFUL_SEARCH_FIELDS = 2
+# DOS matches too many unrelated claims to identify one on its own; it only
+# counts toward MINIMUM_SUCCESSFUL_SEARCH_FIELDS when paired with a field
+# that is actually unique, like Claim ID, Prov TIN, or Patient Account.
+NON_UNIQUE_SEARCH_LABELS = frozenset({"DOS From"})
 
 SEARCH_RESULT_ROW_HEADERS = (
     "H", "B", "W", "S", "Client", "Bill No", "Provider", "Claimant",
@@ -756,10 +760,17 @@ class NoBillOnFileWorkflow:
                         + label
                     )
 
-        if len(kept_labels) < MINIMUM_SUCCESSFUL_SEARCH_FIELDS:
+        unique_kept_labels = [
+            label for label in kept_labels if label not in NON_UNIQUE_SEARCH_LABELS
+        ]
+        if (
+            len(kept_labels) < MINIMUM_SUCCESSFUL_SEARCH_FIELDS
+            or not unique_kept_labels
+        ):
             self.log(
                 "no claim on file; fewer than "
-                f"{MINIMUM_SUCCESSFUL_SEARCH_FIELDS} input(s) returned rows"
+                f"{MINIMUM_SUCCESSFUL_SEARCH_FIELDS} unique input(s) returned rows "
+                f"(kept={', '.join(kept_labels) or 'none'})"
             )
             raise AutomationError("no_claim_on_file", step="6")
 
