@@ -74,8 +74,11 @@ class _NoMatchWorkflow(NoBillOnFileWorkflow):
         self.search_calls = 0
         self.rows_selected = []
 
-    def _search_with_claim_id_fallback(self, claim_id, dos_from, prov_tin, patient_account):
+    def _search_with_claim_id_fallback(
+        self, claim_id, dos_from, prov_tin, patient_account, expected_amount
+    ):
         self.search_calls += 1
+        return None
 
     def _select_row(self, row_index):
         self.rows_selected.append(row_index)

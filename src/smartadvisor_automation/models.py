@@ -15,7 +15,7 @@ Action = Literal[
     "keys",
     "select_tab",
 ]
-Disposition = Literal["no_match", "denied", "paid"]
+Disposition = Literal["no_match", "denied", "paid", "no_claim_on_file"]
 
 
 @dataclass(frozen=True, slots=True)

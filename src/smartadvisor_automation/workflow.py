@@ -511,12 +511,30 @@ def build_reply_template(
     claim_id: str,
     dos_from: str,
     expected_amount: str,
+    prov_tin: str = "",
+    patient_account: str = "",
     paid_amount: str | None = None,
     paid_date: str | None = None,
     check_number: str | None = None,
     denial_code: str | None = None,
 ) -> str:
     header = "To: Requestor\nSubject: Bill Status Response\n\n"
+    if disposition == "no_claim_on_file":
+        identifiers = ", ".join(
+            f"{label} {value}"
+            for label, value in (
+                ("claim", claim_id),
+                ("DOS", dos_from),
+                ("Prov TIN", prov_tin),
+                ("Patient Account", patient_account),
+            )
+            if value
+        ) or "the information provided"
+        return (
+            header + "Concern: No Claim on File\n\n"
+            + f"There is no claim on file matching {identifiers}.\n"
+            + "Please verify the details and resubmit if this claim should be on file."
+        )
     if disposition == "no_match":
         return (
             header + "Concern: No Bill on File\n\n"
@@ -689,7 +707,8 @@ class NoBillOnFileWorkflow:
         dos_from: str,
         prov_tin: str,
         patient_account: str,
-    ) -> None:
+        expected_amount: str,
+    ) -> WorkflowResult | None:
         """Enter each identifying field in priority order, cumulatively.
 
         Claim ID, DOS, Tax ID, and Patient Account are added on top of each
@@ -697,7 +716,9 @@ class NoBillOnFileWorkflow:
         removed, but every previously-kept field stays in place. If fewer
         than MINIMUM_SUCCESSFUL_SEARCH_FIELDS end up kept, a single input
         cannot confidently identify a claim, so it is reported as not on
-        file rather than handed off for amount matching.
+        file rather than handed off for amount matching. Returns a
+        WorkflowResult when no claim was found, or None when the caller
+        should proceed to amount matching against the open results.
         """
         provided_fields = [
             ("Claim ID", claim_id, "4", "4.1"),
@@ -772,7 +793,13 @@ class NoBillOnFileWorkflow:
                 f"{MINIMUM_SUCCESSFUL_SEARCH_FIELDS} unique input(s) returned rows "
                 f"(kept={', '.join(kept_labels) or 'none'})"
             )
-            raise AutomationError("no_claim_on_file", step="6")
+            return self._no_claim_on_file_result(
+                claim_id=claim_id,
+                dos_from=dos_from,
+                expected_amount=expected_amount,
+                prov_tin=prov_tin,
+                patient_account=patient_account,
+            )
 
         if not final_results_open:
             self.log(
@@ -782,12 +809,18 @@ class NoBillOnFileWorkflow:
             self.driver.invalidate_scopes()
             self.progress("6", "Running final kept-input search")
             if self._run_search_step(prefer_enter=True):
-                return
+                return None
             self.log("final kept-input search unexpectedly found no records")
-            raise AutomationError("no_claim_on_file", step="6")
+            return self._no_claim_on_file_result(
+                claim_id=claim_id,
+                dos_from=dos_from,
+                expected_amount=expected_amount,
+                prov_tin=prov_tin,
+                patient_account=patient_account,
+            )
 
         self.log("final search rows ready from kept inputs: " + ", ".join(kept_labels))
-        return
+        return None
 
     def _select_row(self, row_index: int) -> None:
         self._run_step(
@@ -1284,6 +1317,34 @@ class NoBillOnFileWorkflow:
             eor_pdf_path=eor_pdf_path,
         )
 
+    def _no_claim_on_file_result(
+        self,
+        *,
+        claim_id: str,
+        dos_from: str,
+        expected_amount: str,
+        prov_tin: str,
+        patient_account: str,
+    ) -> WorkflowResult:
+        reply = build_reply_template(
+            "no_claim_on_file",
+            claim_id=claim_id,
+            dos_from=dos_from,
+            expected_amount=expected_amount,
+            prov_tin=prov_tin,
+            patient_account=patient_account,
+        )
+        self.progress("complete", "No claim on file")
+        return WorkflowResult(
+            patient_account=patient_account or None,
+            amount=expected_amount,
+            outcome="There is no claim on file matching the information provided.",
+            row_index=0,
+            rows_examined=0,
+            disposition="no_claim_on_file",
+            reply_template=reply,
+        )
+
     def _no_match_result(
         self,
         *,
@@ -1330,7 +1391,11 @@ class NoBillOnFileWorkflow:
         self.log(f"run start expected={expected_amount}")
 
         self.driver.invalidate_scopes()
-        self._search_with_claim_id_fallback(claim_id, dos_from, prov_tin, patient_account)
+        no_claim_result = self._search_with_claim_id_fallback(
+            claim_id, dos_from, prov_tin, patient_account, expected_amount
+        )
+        if no_claim_result is not None:
+            return no_claim_result
         previous_amount: str | None = None
         previous_signature: str | None = None
         for row_index in range(MAX_ITERATIONS):
