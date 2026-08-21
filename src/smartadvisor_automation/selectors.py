@@ -16,6 +16,8 @@ BILL_SEARCH_TEXT_AUTOMATION_ID = "txtClient"
 BILL_SEARCH_ADVANCED_AUTOMATION_ID = "btnAdvacedSearch"
 BILL_SEARCH_CLAIM_AUTOMATION_ID = "txtClaimID"
 BILL_SEARCH_DOS_FROM_AUTOMATION_ID = "txtDOSFrom"
+BILL_SEARCH_PROV_TIN_AUTOMATION_ID = "txtProvTIN"
+BILL_SEARCH_PATIENT_ACCOUNT_AUTOMATION_ID = "txtPatientAccount"
 BILL_SEARCH_RESULTS_AUTOMATION_ID = "fpSearchResult"
 
 # Two different OK buttons whose AutomationIds differ only by case. Matching
@@ -90,6 +92,8 @@ BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS = frozenset(
         BILL_SEARCH_ADVANCED_AUTOMATION_ID,
         BILL_SEARCH_CLAIM_AUTOMATION_ID,
         BILL_SEARCH_DOS_FROM_AUTOMATION_ID,
+        BILL_SEARCH_PROV_TIN_AUTOMATION_ID,
+        BILL_SEARCH_PATIENT_ACCOUNT_AUTOMATION_ID,
         BILL_SEARCH_RESULTS_AUTOMATION_ID,
     }
 )
@@ -160,6 +164,7 @@ RAD_MESSAGEBOX_AUTOMATION_ID = "RadMessageBox"
 
 SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT = "Unhandled exception has occurred"
 SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME = "Continue"
+SMARTADVISOR_NO_RECORDS_TEXT = "No records found matching search criteria."
 
 NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
     ControlSpec(
@@ -191,6 +196,18 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         step="5",
         automation_id=BILL_SEARCH_DOS_FROM_AUTOMATION_ID,
         label="DOS From",
+        action="input",
+    ),
+    ControlSpec(
+        step="5.5",
+        automation_id=BILL_SEARCH_PROV_TIN_AUTOMATION_ID,
+        label="Prov TIN",
+        action="input",
+    ),
+    ControlSpec(
+        step="5.7",
+        automation_id=BILL_SEARCH_PATIENT_ACCOUNT_AUTOMATION_ID,
+        label="Patient Account",
         action="input",
     ),
     ControlSpec(

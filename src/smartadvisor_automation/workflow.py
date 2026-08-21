@@ -59,6 +59,7 @@ OUTCOME_MESSAGE = (
 )
 MAX_ITERATIONS = 500
 HISTORY_TAB_READY_TIMEOUT = 25.0
+MINIMUM_SUCCESSFUL_SEARCH_FIELDS = 2
 
 SEARCH_RESULT_ROW_HEADERS = (
     "H", "B", "W", "S", "Client", "Bill No", "Provider", "Claimant",
@@ -164,6 +165,8 @@ class WorkflowDriver(Protocol):
         self, *, timeout: float = 1.0
     ) -> bool: ...
 
+    def acknowledge_no_records_popup(self, *, timeout: float = 3.0) -> bool: ...
+
     def select_tab(
         self,
         spec: ControlSpec,
@@ -203,6 +206,13 @@ def validate_claim_id(value: str) -> str:
     return normalized
 
 
+def validate_optional_claim_id(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    return validate_claim_id(normalized)
+
+
 def normalize_dos(value: str) -> str:
     normalized = value.strip()
     try:
@@ -210,6 +220,27 @@ def normalize_dos(value: str) -> str:
     except ValueError as exc:
         raise ValueError("DOS From must use MM/DD/YYYY.") from exc
     return parsed.strftime("%m/%d/%Y")
+
+
+def normalize_optional_dos(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    return normalize_dos(normalized)
+
+
+def validate_search_inputs(
+    claim_id: str,
+    dos_from: str,
+    prov_tin: str,
+    patient_account: str,
+) -> None:
+    if any((claim_id, dos_from, prov_tin, patient_account)):
+        return
+    raise ValueError(
+        "Enter at least one search value: Claim ID, DOS, Patient Account, "
+        "or Prov TIN."
+    )
 
 
 def validate_expected_amount(value: str) -> str:
@@ -564,6 +595,181 @@ class NoBillOnFileWorkflow:
             "6", "Running the search",
             lambda: self.driver.click(CONTROLS_BY_STEP["6"]),
         )
+
+    def _open_search_once_for_case(self) -> None:
+        self._check_cancelled()
+        self.progress("attach", "Attaching to SmartAdvisor")
+        backend = self.driver.attach(CONTROLS_BY_STEP["1"])
+        self.log(f"attached backend={backend}")
+        self._run_step(
+            "1", "Opening search options",
+            lambda: self.driver.click_with_invoke_fallback(
+                CONTROLS_BY_STEP["1"], CONTROLS_BY_STEP["2"]
+            ),
+        )
+        self._run_step(
+            "2", "Clearing the search box",
+            lambda: self.driver.clear(CONTROLS_BY_STEP["2"]),
+        )
+        self._run_step(
+            "3", "Opening Advanced Search",
+            lambda: self.driver.click(CONTROLS_BY_STEP["3"]),
+        )
+
+    def _clear_progressive_search_field(self, label: str, clear_step: str) -> None:
+        self._run_step(
+            clear_step,
+            f"Clearing optional {label}",
+            lambda: self.driver.clear(CONTROLS_BY_STEP[clear_step]),
+        )
+
+    def _enter_progressive_search_field(
+        self,
+        label: str,
+        clear_step: str,
+        input_step: str,
+        value: str,
+    ) -> None:
+        self._clear_progressive_search_field(label, clear_step)
+        self._run_step(
+            input_step,
+            f"Entering optional {label}",
+            lambda: self.driver.input_text(CONTROLS_BY_STEP[clear_step], value),
+        )
+
+    def _run_search_step(self, *, prefer_enter: bool = False) -> bool:
+        if self.driver.acknowledge_no_records_popup(timeout=0.5):
+            self.log("SmartAdvisor reported no records found before search OK")
+            return False
+
+        try:
+            if prefer_enter:
+                self.driver.send_focused_keys("{ENTER}", step="6")
+            else:
+                self.driver.click(CONTROLS_BY_STEP["6"])
+        except AutomationError as exc:
+            if self.driver.acknowledge_no_records_popup(timeout=2.0):
+                self.log("SmartAdvisor reported no records found while running search")
+                return False
+            if not prefer_enter:
+                self.log("search OK button unavailable; retrying search with Enter")
+                try:
+                    self.driver.send_focused_keys("{ENTER}", step="6")
+                except AutomationError:
+                    if self.driver.acknowledge_no_records_popup(timeout=2.0):
+                        self.log(
+                            "SmartAdvisor reported no records found while "
+                            "running Enter fallback search"
+                        )
+                        return False
+                    raise exc
+            else:
+                raise
+
+        self.driver.acknowledge_smartadvisor_exception_popup(timeout=1.0)
+        if self.driver.acknowledge_no_records_popup(timeout=3.0):
+            self.log("SmartAdvisor reported no records found after search")
+            return False
+        return True
+
+    def _search_with_claim_id_fallback(
+        self,
+        claim_id: str,
+        dos_from: str,
+        prov_tin: str,
+        patient_account: str,
+    ) -> None:
+        """Enter each identifying field in priority order, cumulatively.
+
+        Claim ID, DOS, Tax ID, and Patient Account are added on top of each
+        other one at a time. A field that comes back "No records found" is
+        removed, but every previously-kept field stays in place. If fewer
+        than MINIMUM_SUCCESSFUL_SEARCH_FIELDS end up kept, a single input
+        cannot confidently identify a claim, so it is reported as not on
+        file rather than handed off for amount matching.
+        """
+        provided_fields = [
+            ("Claim ID", claim_id, "4", "4.1"),
+            ("DOS From", dos_from, "5", "5.1"),
+            ("Prov TIN", prov_tin, "5.5", "5.6"),
+            ("Patient Account", patient_account, "5.7", "5.8"),
+        ]
+        provided_fields = [
+            (label, value, clear_step, input_step)
+            for label, value, clear_step, input_step in provided_fields
+            if str(value or "").strip()
+        ]
+
+        kept_labels: list[str] = []
+        final_results_open = False
+
+        self._open_search_once_for_case()
+
+        for label, value, clear_step, input_step in provided_fields:
+            self.log(
+                "search attempt adding "
+                + label
+                + (
+                    f" to kept inputs: {', '.join(kept_labels)}"
+                    if kept_labels
+                    else ""
+                )
+            )
+            self._enter_progressive_search_field(
+                label, clear_step, input_step, str(value).strip()
+            )
+            self._check_cancelled()
+            self.progress("6", f"Running search after adding {label}")
+            if self._run_search_step():
+                kept_labels.append(label)
+                final_results_open = True
+                self.log(f"search kept {label}; matched search inputs={len(kept_labels)}")
+                self.driver.invalidate_scopes()
+                continue
+
+            final_results_open = False
+            self.log(f"search rejected {label}; clearing only that input")
+            self.driver.invalidate_scopes()
+            self._clear_progressive_search_field(label, clear_step)
+            if kept_labels:
+                self.progress(
+                    "6", "Restoring results after clearing rejected " + label
+                )
+                if self._run_search_step(prefer_enter=True):
+                    final_results_open = True
+                    self.log(
+                        "search rows restored from kept inputs: "
+                        + ", ".join(kept_labels)
+                    )
+                    self.driver.invalidate_scopes()
+                else:
+                    final_results_open = False
+                    self.log(
+                        "kept-input restore found no records after rejecting "
+                        + label
+                    )
+
+        if len(kept_labels) < MINIMUM_SUCCESSFUL_SEARCH_FIELDS:
+            self.log(
+                "no claim on file; fewer than "
+                f"{MINIMUM_SUCCESSFUL_SEARCH_FIELDS} input(s) returned rows"
+            )
+            raise AutomationError("no_claim_on_file", step="6")
+
+        if not final_results_open:
+            self.log(
+                "rerunning final kept-input search without fresh-start: "
+                + ", ".join(kept_labels)
+            )
+            self.driver.invalidate_scopes()
+            self.progress("6", "Running final kept-input search")
+            if self._run_search_step(prefer_enter=True):
+                return
+            self.log("final kept-input search unexpectedly found no records")
+            raise AutomationError("no_claim_on_file", step="6")
+
+        self.log("final search rows ready from kept inputs: " + ", ".join(kept_labels))
+        return
 
     def _select_row(self, row_index: int) -> None:
         self._run_step(
@@ -1091,17 +1297,22 @@ class NoBillOnFileWorkflow:
         claim_id: str,
         dos_from: str,
         expected_amount: str,
+        prov_tin: str = "",
+        patient_account: str = "",
         *,
         leave_match_open: bool = True,
     ) -> WorkflowResult:
-        claim_id = validate_claim_id(claim_id)
-        dos_from = normalize_dos(dos_from)
+        claim_id = validate_optional_claim_id(claim_id)
+        dos_from = normalize_optional_dos(dos_from)
         expected_amount = validate_expected_amount(expected_amount)
         expected = normalize_amount(expected_amount)
+        prov_tin = prov_tin.strip()
+        patient_account = patient_account.strip()
+        validate_search_inputs(claim_id, dos_from, prov_tin, patient_account)
         self.log(f"run start expected={expected_amount}")
 
         self.driver.invalidate_scopes()
-        self._search(claim_id, dos_from)
+        self._search_with_claim_id_fallback(claim_id, dos_from, prov_tin, patient_account)
         previous_amount: str | None = None
         previous_signature: str | None = None
         for row_index in range(MAX_ITERATIONS):

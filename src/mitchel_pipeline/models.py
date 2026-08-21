@@ -32,6 +32,8 @@ class SmartAdvisorJob:
     dos_from: str
     expected_amount: str
     source_message_id: str
+    provider_tin: str = ""
+    patient_account: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "claim_id", normalize_claim_number(self.claim_id))
@@ -54,6 +56,8 @@ class SmartAdvisorJob:
             dos_from=str(value["dos_from"]),
             expected_amount=str(value["expected_amount"]),
             source_message_id=str(value.get("source_message_id", "")),
+            provider_tin=str(value.get("provider_tin", "")),
+            patient_account=str(value.get("patient_account", "")),
         )
 
 

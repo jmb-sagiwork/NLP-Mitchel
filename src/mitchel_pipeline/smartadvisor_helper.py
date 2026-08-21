@@ -44,6 +44,8 @@ class HelperServer:
                 job.claim_id,
                 job.dos_from,
                 job.expected_amount,
+                job.provider_tin,
+                job.patient_account,
                 leave_match_open=leave_open,
             )
             terminal = {

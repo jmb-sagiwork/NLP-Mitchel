@@ -31,8 +31,10 @@ def jobs_from_result(result: TriageResult, message_id: str) -> list[SmartAdvisor
     if result.status is not TriageStatus.CLASSIFIED or result.concern_id != "bill_status":
         return []
 
-    claim_id = _single_value(result, "claim_id")
-    if not claim_id:
+    claim_id = _single_value(result, "claim_id") or ""
+    provider_tin = _single_value(result, "provider_tin") or ""
+    patient_account = _single_value(result, "patient_account") or ""
+    if not any((claim_id, provider_tin, patient_account)):
         return []
 
     pairs: list[tuple[str, str]] = []
@@ -60,6 +62,8 @@ def jobs_from_result(result: TriageResult, message_id: str) -> list[SmartAdvisor
                 dos_from=normalized_dos,
                 expected_amount=amount.strip(),
                 source_message_id=message_id,
+                provider_tin=provider_tin,
+                patient_account=patient_account,
             )
         )
     return jobs

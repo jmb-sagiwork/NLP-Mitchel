@@ -28,6 +28,7 @@ from smartadvisor_automation.selectors import (
     SAVE_AS_OVERWRITE_TEXTS,
     SAVE_AS_OVERWRITE_YES_KEY,
     SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME,
+    SMARTADVISOR_NO_RECORDS_TEXT,
     SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT,
 )
 
@@ -716,6 +717,64 @@ class SmartAdvisorDriver:
                 return True
 
             time.sleep(self.poll_interval)
+        return False
+
+    def acknowledge_no_records_popup(self, *, timeout: float = 3.0) -> bool:
+        """Close SmartAdvisor's RadMessageBox when a search returns no rows."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for window in self._windows_for_process():
+                elements = self._elements_in_scope(window, depth=4)
+                message_boxes = [
+                    element
+                    for element in elements
+                    if str(
+                        getattr(element.element_info, "automation_id", "") or ""
+                    )
+                    == RAD_MESSAGEBOX_AUTOMATION_ID
+                ]
+                for message_box in message_boxes:
+                    message_elements = self._elements_in_scope(
+                        message_box, depth=3
+                    )
+                    has_no_records_text = any(
+                        SMARTADVISOR_NO_RECORDS_TEXT.casefold()
+                        in self._element_name(element).casefold()
+                        for element in message_elements
+                    )
+                    if not has_no_records_text:
+                        continue
+
+                    for element in message_elements:
+                        info = element.element_info
+                        control_type = str(
+                            getattr(info, "control_type", "") or ""
+                        ).casefold()
+                        name = self._element_name(element).strip()
+                        if (
+                            control_type == "button"
+                            and name.replace("&", "").casefold() == "ok"
+                            and self._safe_state(element, "is_visible")
+                            and self._safe_state(element, "is_enabled")
+                        ):
+                            try:
+                                element.set_focus()
+                                element.click_input()
+                            except Exception as exc:
+                                raise AutomationError(
+                                    "no_records_ack_failed", step="6"
+                                ) from exc
+                            self._log(
+                                "acknowledged SmartAdvisor no-records popup"
+                            )
+                            return True
+
+                    self._log("SmartAdvisor no-records popup found without OK")
+                    return True
+
+            time.sleep(self.poll_interval)
+
         return False
 
     def acknowledge_duplicate_selection_popup(
