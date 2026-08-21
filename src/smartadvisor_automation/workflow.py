@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from itertools import zip_longest
+from pathlib import Path
 from typing import Protocol
 
 from smartadvisor_automation.errors import AutomationError, WorkflowCancelled
@@ -23,6 +25,10 @@ from smartadvisor_automation.selectors import (
     BILL_TAB_NEXT_KEY,
     BILL_TAB_SETTLE_TIMEOUT,
     CONTROLS_BY_STEP,
+    EOR_OUTPUT_DIRECTORY_NAME,
+    EXPORT_REPORT_OK_BUTTON_NAME,
+    EXPORT_REPORT_OK_KEYS,
+    EXPORT_REPORT_WINDOW_NAME,
     GRID_CALIBRATE_DOWN,
     GRID_CALIBRATE_UP,
     GRID_CONFIRM_ROW,
@@ -36,6 +42,15 @@ from smartadvisor_automation.selectors import (
     LINES_FIRST_ROW_CLICK_Y,
     LINES_ROW_HEIGHT,
     LINES_ROW_SELECTOR_CLICK_X,
+    PRINT_EOR_ADD_FALLBACK_KEYS,
+    PRINT_EOR_BILL_LIST_COMMIT_KEYS,
+    PRINT_EOR_KEYS,
+    PRINT_EOR_OK_FALLBACK_KEYS,
+    PRINT_SETUP_FILE_FALLBACK_KEYS,
+    SAVE_AS_FILENAME_KEYS,
+    SAVE_AS_REVIEW_DELAY_SECONDS,
+    SAVE_AS_SAVE_KEYS,
+    SCOPE_SEARCH_DEPTH,
 )
 
 OUTCOME_MESSAGE = (
@@ -102,6 +117,8 @@ class WorkflowDriver(Protocol):
 
     def input_text(self, spec: ControlSpec, value: str) -> None: ...
 
+    def input_child_edit_text(self, spec: ControlSpec, value: str) -> None: ...
+
     def read_text(
         self, spec: ControlSpec, *, timeout: float | None = None
     ) -> str: ...
@@ -119,6 +136,28 @@ class WorkflowDriver(Protocol):
     def click_at(self, spec: ControlSpec, *, x: int, y: int) -> None: ...
 
     def send_focused_keys(self, keys: str, *, step: str) -> None: ...
+
+    def paste_focused_text(self, value: str, *, step: str) -> None: ...
+
+    def wait_for_window_title(self, title: str, *, timeout: float) -> bool: ...
+
+    def focus_window_title(self, title: str, *, timeout: float) -> None: ...
+
+    def click_child_in_window_title(
+        self,
+        title: str,
+        spec: ControlSpec,
+        *,
+        timeout: float,
+    ) -> None: ...
+
+    def acknowledge_duplicate_selection_popup(
+        self, *, timeout: float = 1.0
+    ) -> bool: ...
+
+    def acknowledge_save_as_overwrite_popup(
+        self, *, timeout: float = 1.0
+    ) -> bool: ...
 
     def acknowledge_smartadvisor_exception_popup(
         self, *, timeout: float = 1.0
@@ -198,6 +237,18 @@ def amount_is_nonzero(value: str) -> bool:
         return normalize_amount(value) != Decimal("0")
     except ValueError:
         return False
+
+
+def bill_document_name(row_details: dict[str, str]) -> str:
+    client = (row_details.get("Client") or "").strip()
+    bill_no = (
+        row_details.get("Bill No")
+        or row_details.get("Bill no")
+        or ""
+    ).strip()
+    if client and bill_no:
+        return f"{client}-{bill_no}"
+    return bill_no or client or "bill"
 
 
 def describe_comparison(amount: str, expected: str, matched: bool) -> str:
@@ -717,6 +768,223 @@ class NoBillOnFileWorkflow:
                 br_msg_codes.append(row_copy.br_msg_code)
         return ", ".join(denied_codes), ", ".join(br_msg_codes)
 
+    def _open_print_eor_window(self) -> None:
+        self._run_step(
+            "7.9",
+            "Opening Print Explanation of Review",
+            lambda: self.driver.send_focused_keys(PRINT_EOR_KEYS, step="7.9"),
+        )
+        if not self.driver.is_present(CONTROLS_BY_STEP["7.9"], timeout=10.0):
+            raise AutomationError("print_eor_window_not_found", step="7.9")
+        self.log("Print Explanation of Review window ready")
+
+    def _click_print_eor_add(self) -> None:
+        try:
+            self.driver.click(CONTROLS_BY_STEP["8.3"])
+            return
+        except AutomationError as exc:
+            if exc.code not in {
+                "selector_not_found",
+                "selector_ambiguous",
+                "click_failed",
+            }:
+                raise
+
+        self.log("Print EOR Add selector unavailable; trying Alt+A")
+        self.driver.send_focused_keys(PRINT_EOR_ADD_FALLBACK_KEYS, step="8.3")
+
+    def _click_print_eor_ok(self) -> None:
+        try:
+            self.driver.click(CONTROLS_BY_STEP["8.4"])
+            return
+        except AutomationError as exc:
+            if exc.code not in {
+                "selector_not_found",
+                "selector_ambiguous",
+                "click_failed",
+            }:
+                raise
+
+        self.log("Print EOR OK selector unavailable; trying Alt+O")
+        self.driver.send_focused_keys(PRINT_EOR_OK_FALLBACK_KEYS, step="8.4")
+
+    def _prepare_print_eor_selection(self, row_details: dict[str, str]) -> None:
+        bill_no = (
+            row_details.get("Bill No")
+            or row_details.get("Bill no")
+            or ""
+        ).strip()
+        if not bill_no:
+            raise AutomationError("print_eor_bill_no_missing", step="8.2")
+
+        self._run_step(
+            "8.0",
+            "Selecting Print EOR List option",
+            lambda: self.driver.click(CONTROLS_BY_STEP["8.0"]),
+        )
+        self._run_step(
+            "8.1",
+            "Selecting Print EOR Bill No option",
+            lambda: self.driver.click(CONTROLS_BY_STEP["8.1"]),
+        )
+        self._run_step(
+            "8.2",
+            "Entering Print EOR bill number",
+            lambda: self.driver.input_child_edit_text(
+                CONTROLS_BY_STEP["8.2"], bill_no
+            ),
+        )
+        self._run_step(
+            "8.2.1",
+            "Committing Print EOR bill number",
+            lambda: self.driver.send_focused_keys(
+                PRINT_EOR_BILL_LIST_COMMIT_KEYS,
+                step="8.2.1",
+            ),
+        )
+        self._run_step(
+            "8.3",
+            "Adding bill to Print EOR selection",
+            self._click_print_eor_add,
+        )
+        if self.driver.acknowledge_duplicate_selection_popup(timeout=2.5):
+            self.log("Print EOR duplicate selection was not added again")
+        else:
+            self.log(f"Print EOR bill {bill_no} added or already ready")
+        self._run_step(
+            "8.4",
+            "Confirming Print EOR selection",
+            self._click_print_eor_ok,
+        )
+        self.log("Print EOR OK clicked")
+        self._confirm_print_setup_file_output()
+
+    def _confirm_print_setup_file_output(self) -> None:
+        if not self.driver.is_present(CONTROLS_BY_STEP["8.5"], timeout=10.0):
+            raise AutomationError("print_setup_window_not_found", step="8.5")
+        self.log("Print Setup window ready")
+
+        try:
+            self._run_step(
+                "8.6",
+                "Selecting Print Setup File option",
+                lambda: self.driver.click(CONTROLS_BY_STEP["8.6"]),
+            )
+        except AutomationError:
+            self.log("Print Setup File radio not resolved; trying Alt+F")
+            self.driver.send_focused_keys(
+                PRINT_SETUP_FILE_FALLBACK_KEYS,
+                step="8.6",
+            )
+
+        self._run_step(
+            "8.7",
+            "Confirming Print Setup",
+            lambda: self.driver.click(CONTROLS_BY_STEP["8.7"]),
+        )
+        self.log("Print Setup OK clicked")
+
+    @staticmethod
+    def _eor_output_directory() -> Path:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "SmartAdvisorAutomation" / EOR_OUTPUT_DIRECTORY_NAME
+
+    @staticmethod
+    def _safe_file_stem(value: str) -> str:
+        cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip(" .-")
+        return cleaned or "bill"
+
+    def _eor_pdf_path(self, row_details: dict[str, str]) -> Path:
+        bill_name = self._safe_file_stem(bill_document_name(row_details))
+        return self._eor_output_directory() / f"{bill_name}.pdf"
+
+    def _save_export_report_pdf(self, row_details: dict[str, str]) -> str:
+        pdf_path = self._eor_pdf_path(row_details)
+        try:
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise AutomationError("eor_directory_not_created", step="8.8") from exc
+
+        if self.driver.wait_for_window_title(
+            EXPORT_REPORT_WINDOW_NAME,
+            timeout=45.0,
+        ):
+            self.log("Export Report found via global window search")
+        else:
+            raise AutomationError(
+                "export_report_window_not_found",
+                step="8.8",
+            )
+        self.log("Export Report window ready")
+
+        export_ok_spec = ControlSpec(
+            step="9.2",
+            automation_id="",
+            label="Export Report OK",
+            action="click",
+            name=EXPORT_REPORT_OK_BUTTON_NAME,
+            control_type="Button",
+            search_depth=SCOPE_SEARCH_DEPTH,
+        )
+
+        def click_export_browse() -> None:
+            try:
+                self.driver.click_child_in_window_title(
+                    EXPORT_REPORT_WINDOW_NAME,
+                    CONTROLS_BY_STEP["8.9"],
+                    timeout=15.0,
+                )
+            except AutomationError:
+                self.driver.click(CONTROLS_BY_STEP["8.9"])
+
+        def confirm_export_report() -> None:
+            try:
+                self.driver.click_child_in_window_title(
+                    EXPORT_REPORT_WINDOW_NAME,
+                    export_ok_spec,
+                    timeout=15.0,
+                )
+            except AutomationError:
+                self.driver.focus_window_title(
+                    EXPORT_REPORT_WINDOW_NAME,
+                    timeout=15.0,
+                )
+                self.driver.send_focused_keys(
+                    EXPORT_REPORT_OK_KEYS,
+                    step="9.2",
+                )
+
+        self._run_step("8.9", "Opening EOR Save As", click_export_browse)
+        time.sleep(0.8)
+        self._run_step(
+            "9.0",
+            "Entering EOR PDF path",
+            lambda: self._enter_save_as_path(str(pdf_path)),
+        )
+        self.log(
+            f"waiting {SAVE_AS_REVIEW_DELAY_SECONDS:g}s before Save As confirm"
+        )
+        time.sleep(SAVE_AS_REVIEW_DELAY_SECONDS)
+        self._run_step(
+            "9.1",
+            "Saving EOR PDF path",
+            lambda: self.driver.send_focused_keys(
+                SAVE_AS_SAVE_KEYS,
+                step="9.1",
+            ),
+        )
+        if self.driver.acknowledge_save_as_overwrite_popup(timeout=4.0):
+            self.log("existing EOR PDF overwrite confirmed")
+        time.sleep(1.0)
+        self._run_step("9.2", "Confirming Export Report", confirm_export_report)
+        self.log(f"EOR PDF save requested at {pdf_path}")
+        return str(pdf_path)
+
+    def _enter_save_as_path(self, pdf_path: str) -> None:
+        self.driver.send_focused_keys(SAVE_AS_FILENAME_KEYS, step="9.0")
+        self.driver.send_focused_keys("^a{BACKSPACE}", step="9.0")
+        self.driver.paste_focused_text(pdf_path, step="9.0")
+
     def _resolve_matched_bill(
         self,
         *,
@@ -737,6 +1005,11 @@ class NoBillOnFileWorkflow:
             denial_code = ", ".join(
                 value for value in (denied_codes, br_msg_codes) if value
             ) or None
+            eor_pdf_path = None
+            if denial_code:
+                self._open_print_eor_window()
+                self._prepare_print_eor_selection(row_details)
+                eor_pdf_path = self._save_export_report_pdf(row_details)
             reply = build_reply_template(
                 "denied",
                 claim_id=claim_id,
@@ -755,10 +1028,14 @@ class NoBillOnFileWorkflow:
                 reply_template=reply,
                 paid_amount=paid_amount,
                 denial_code=denial_code,
+                eor_pdf_path=eor_pdf_path,
             )
 
         self._select_bill_tab("7.11", "Header", BILL_HEADER_TAB_NAME_FRAGMENT)
         paid_date = self._read_header_paid_date()
+        self._open_print_eor_window()
+        self._prepare_print_eor_selection(row_details)
+        eor_pdf_path = self._save_export_report_pdf(row_details)
         reply = build_reply_template(
             "paid",
             claim_id=claim_id,
@@ -779,6 +1056,7 @@ class NoBillOnFileWorkflow:
             paid_amount=paid_amount,
             paid_date=paid_date or None,
             check_number=check_number or None,
+            eor_pdf_path=eor_pdf_path,
         )
 
     def _no_match_result(

@@ -50,6 +50,9 @@ def _norm_upper_alnum(raw: str) -> str:
 def _norm_claim_id(raw: str) -> str:
     """Preserve the carrier suffix separator for 7-digit + check-digit IDs."""
     normalized = _norm_upper_alnum(raw)
+    carrier_suffix = re.fullmatch(r"(\d{7})[A-Z]+(\d{1,3})", normalized)
+    if carrier_suffix:
+        return f"{carrier_suffix.group(1)}-{carrier_suffix.group(2)}"
     if re.fullmatch(r"\d{8}", normalized):
         return f"{normalized[:-1]}-{normalized[-1]}"
     return normalized
@@ -89,6 +92,24 @@ def _norm_date_iso(raw: str) -> str:
     return s
 
 
+_SERVICE_DATE_TOKEN = re.compile(
+    r"\b(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{2}-\d{2}|"
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+"
+    r"\d{1,2},?\s+\d{4})\b",
+    re.IGNORECASE,
+)
+
+
+def _norm_service_date(raw: str) -> str:
+    """Normalize one service date or choose the earliest date in a range."""
+
+    normalized_dates = [
+        _norm_date_iso(match.group(0)) for match in _SERVICE_DATE_TOKEN.finditer(raw)
+    ]
+    iso_dates = [date for date in normalized_dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date)]
+    return min(iso_dates) if iso_dates else _norm_date_iso(raw)
+
+
 NORMALIZERS = {
     "trim": _norm_trim,
     "upper_alnum": _norm_upper_alnum,
@@ -96,6 +117,7 @@ NORMALIZERS = {
     "digits": _norm_digits,
     "money": _norm_money,
     "date_iso": _norm_date_iso,
+    "service_date": _norm_service_date,
 }
 
 

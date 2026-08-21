@@ -34,6 +34,10 @@ _SIGNATURE_MARKERS = [
 ]
 
 _QUOTE_PREFIX = re.compile(r"^\s*>+\s?", re.MULTILINE)
+_TRANSPORT_HEADER = re.compile(
+    r"^(From|Sent|To|Subject):[ \t]*(.*)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,37 @@ def normalize(text: str) -> str:
     return text.strip()
 
 
+def separate_transport_headers(body: str, subject: str = "") -> tuple[str, str]:
+    """Move a pasted mail header's Subject into the subject and remove headers.
+
+    Outlook/NICE copies can begin with a contiguous From/Sent/To/Subject block.
+    That block is metadata for the newest message, not quoted history. Requiring
+    at least two recognized headers avoids stripping ordinary prose that happens
+    to begin with a single ``From:`` or ``Subject:`` line.
+    """
+
+    body_n = normalize(body)
+    subject_n = normalize(subject)
+    lines = body_n.splitlines()
+    headers: dict[str, str] = {}
+    index = 0
+    while index < len(lines):
+        match = _TRANSPORT_HEADER.fullmatch(lines[index])
+        if match is None:
+            break
+        headers[match.group(1).casefold()] = match.group(2).strip()
+        index += 1
+
+    if len(headers) < 2 or "subject" not in headers:
+        return subject_n, body_n
+
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    clean_body = normalize("\n".join(lines[index:]))
+    clean_subject = subject_n or normalize(headers["subject"])
+    return clean_subject, clean_body
+
+
 def _first_reply_marker(text: str) -> int | None:
     positions = [m.start() for pat in _REPLY_MARKERS for m in pat.finditer(text)]
     # Ignore a marker at the very top: that is a forwarded header, not history.
@@ -104,8 +139,7 @@ def _signature_start(text: str) -> int | None:
 
 def prepare(body: str, subject: str = "") -> PreparedText:
     """Split raw input into ordered segments with stable offsets."""
-    subject_n = normalize(subject)
-    body_n = normalize(body)
+    subject_n, body_n = separate_transport_headers(body, subject)
 
     if subject_n:
         full = f"{subject_n}\n{body_n}"

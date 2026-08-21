@@ -91,3 +91,53 @@ def test_tab_name_matching_ignores_rendered_accelerator_markers(
 
     assert tab.keys == []
     assert tab.clicks == []
+
+
+class _ElementInfo:
+    def __init__(self, control_type: str) -> None:
+        self.control_type = control_type
+
+
+class _InnerEdit:
+    def __init__(self) -> None:
+        self.element_info = _ElementInfo("Edit")
+        self.value = ""
+        self.focused = False
+        self.clicked = False
+
+    def is_visible(self) -> bool:
+        return True
+
+    def is_enabled(self) -> bool:
+        return True
+
+    def set_focus(self) -> None:
+        self.focused = True
+
+    def click_input(self) -> None:
+        self.clicked = True
+
+    def set_edit_text(self, value: str) -> None:
+        self.value = value
+
+
+class _ParentEdit:
+    def __init__(self, child: _InnerEdit) -> None:
+        self.child = child
+
+    def descendants(self, *, depth: int):
+        assert depth == 1
+        return [self.child]
+
+
+def test_input_child_edit_text_targets_inner_winforms_edit(monkeypatch) -> None:
+    child = _InnerEdit()
+    parent = _ParentEdit(child)
+    driver = SmartAdvisorDriver(poll_interval=0.001)
+    monkeypatch.setattr(driver, "resolve", lambda _spec: parent)
+
+    driver.input_child_edit_text(CONTROLS_BY_STEP["8.2"], "BILL-77")
+
+    assert child.value == "BILL-77"
+    assert child.focused
+    assert child.clicked

@@ -24,6 +24,7 @@ from email_triage.render import (
     to_json,
     to_plain_text,
 )
+from email_triage.textprep import separate_transport_headers
 from email_triage.types import TriageResult
 
 from . import theme as th
@@ -555,7 +556,15 @@ class TriageApp:
             self.save_status.configure(text="nothing to analyze")
             return
         self.analyze_btn.configure(state="disabled", text="Analyzing...")
-        subject = self.subject_var.get()
+        subject, clean_body = separate_transport_headers(
+            body,
+            self.subject_var.get(),
+        )
+        if clean_body != body:
+            self.subject_var.set(subject)
+            self.body_text.delete("1.0", "end")
+            self.body_text.insert("1.0", clean_body)
+            body = clean_body
 
         def work() -> None:
             try:

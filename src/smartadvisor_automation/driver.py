@@ -22,6 +22,11 @@ from smartadvisor_automation.selectors import (
     GRID_FIRST_ROW_CLICK_Y,
     GRID_ROW_CLICK_X,
     GRID_ROW_HEIGHT,
+    PRINT_EOR_DUPLICATE_NO_KEY,
+    PRINT_EOR_DUPLICATE_SELECTION_TEXT,
+    RAD_MESSAGEBOX_AUTOMATION_ID,
+    SAVE_AS_OVERWRITE_TEXTS,
+    SAVE_AS_OVERWRITE_YES_KEY,
     SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME,
     SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT,
 )
@@ -34,6 +39,17 @@ from smartadvisor_automation.selectors import (
 # in between), so two is enough. Falls back to an unrestricted walk if the
 # backend does not support a depth argument.
 SCOPE_SEARCH_DEPTH = 2
+
+
+def _write_clipboard_text(value: str) -> None:
+    import win32clipboard
+
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(value)
+    finally:
+        win32clipboard.CloseClipboard()
 
 
 class SmartAdvisorDriver:
@@ -243,6 +259,133 @@ class SmartAdvisorDriver:
             )
         except Exception as exc:
             raise AutomationError("window_enumeration_failed") from exc
+
+    def _desktop_windows(self) -> list[Any]:
+        if self.backend is None:
+            raise AutomationError("not_attached")
+
+        from pywinauto import Desktop
+
+        try:
+            return list(
+                Desktop(backend=self.backend).windows(
+                    visible_only=True,
+                    enabled_only=False,
+                )
+            )
+        except Exception as exc:
+            raise AutomationError("window_enumeration_failed") from exc
+
+    def _find_window_by_title(
+        self,
+        title: str,
+        *,
+        timeout: float,
+    ) -> Any | None:
+        expected = title.strip().casefold()
+        deadline = time.monotonic() + timeout
+
+        while time.monotonic() < deadline:
+            matches = []
+            for window in self._desktop_windows():
+                name = self._element_name(window).strip().casefold()
+                if name == expected:
+                    matches.append(window)
+
+            visible_matches = [
+                window
+                for window in matches
+                if self._safe_state(window, "is_visible")
+            ]
+            if visible_matches:
+                enabled_matches = [
+                    window
+                    for window in visible_matches
+                    if self._safe_state(window, "is_enabled")
+                ]
+                return (enabled_matches or visible_matches)[0]
+
+            time.sleep(self.poll_interval)
+
+        return None
+
+    def wait_for_window_title(self, title: str, *, timeout: float) -> bool:
+        started = time.perf_counter()
+        window = self._find_window_by_title(title, timeout=timeout)
+        if window is None:
+            self._log(
+                f"global window {title!r} absent "
+                f"elapsed={time.perf_counter() - started:.3f}s"
+            )
+            return False
+        self._log(
+            f"global window {title!r} present "
+            f"elapsed={time.perf_counter() - started:.3f}s"
+        )
+        return True
+
+    def focus_window_title(self, title: str, *, timeout: float) -> None:
+        started = time.perf_counter()
+        window = self._find_window_by_title(title, timeout=timeout)
+        if window is None:
+            raise AutomationError("window_not_found")
+        try:
+            window.set_focus()
+        except Exception as exc:
+            raise AutomationError("focus_failed") from exc
+        self._log(
+            f"focus-window {title!r} "
+            f"elapsed={time.perf_counter() - started:.3f}s"
+        )
+
+    def click_child_in_window_title(
+        self,
+        title: str,
+        spec: ControlSpec,
+        *,
+        timeout: float,
+    ) -> None:
+        started = time.perf_counter()
+        window = self._find_window_by_title(title, timeout=timeout)
+        if window is None:
+            raise AutomationError("window_not_found", step=spec.step)
+
+        candidates = self._elements_in_scope(
+            window,
+            depth=spec.search_depth,
+        )
+        matches = matching_spec_elements(candidates, spec)
+        actionable = [
+            element
+            for element, _strategy in matches
+            if self._safe_state(element, "is_visible")
+            and self._safe_state(element, "is_enabled")
+        ]
+        if len(actionable) != 1:
+            code = (
+                "selector_ambiguous"
+                if len(actionable) > 1
+                else "selector_not_found"
+            )
+            self._log(
+                f"resolve {title!r}/{self._describe(spec)} -> {code} "
+                f"(matches={len(actionable)})"
+            )
+            raise AutomationError(code, step=spec.step)
+
+        element = actionable[0]
+        try:
+            try:
+                window.set_focus()
+            except Exception:
+                pass
+            element.click_input()
+        except Exception as exc:
+            raise AutomationError("click_failed", step=spec.step) from exc
+        self._log(
+            f"click-window-child {title!r}/{self._describe(spec)} "
+            f"elapsed={time.perf_counter() - started:.3f}s"
+        )
 
     @staticmethod
     def _elements_in_scope(
@@ -575,6 +718,150 @@ class SmartAdvisorDriver:
             time.sleep(self.poll_interval)
         return False
 
+    def acknowledge_duplicate_selection_popup(
+        self,
+        *,
+        timeout: float = 2.0,
+    ) -> bool:
+        """Answer No when Print EOR says the bill is already selected."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for window in self._windows_for_process():
+                elements = self._elements_in_scope(window, depth=4)
+                message_boxes = [
+                    element
+                    for element in elements
+                    if str(
+                        getattr(element.element_info, "automation_id", "") or ""
+                    )
+                    == RAD_MESSAGEBOX_AUTOMATION_ID
+                ]
+                for message_box in message_boxes:
+                    message_elements = self._elements_in_scope(
+                        message_box, depth=3
+                    )
+                    has_duplicate_text = any(
+                        PRINT_EOR_DUPLICATE_SELECTION_TEXT.casefold()
+                        in self._element_name(element).casefold()
+                        for element in message_elements
+                    )
+                    if not has_duplicate_text:
+                        continue
+
+                    for element in message_elements:
+                        info = element.element_info
+                        control_type = str(
+                            getattr(info, "control_type", "") or ""
+                        ).casefold()
+                        name = self._element_name(element).replace("&", "")
+                        if control_type == "button" and name == "No":
+                            try:
+                                element.click_input()
+                            except Exception as exc:
+                                raise AutomationError(
+                                    "duplicate_selection_ack_failed",
+                                    step="8.3",
+                                ) from exc
+                            self._log(
+                                "acknowledged duplicate selection popup with No"
+                            )
+                            return True
+
+                    self.send_focused_keys(
+                        PRINT_EOR_DUPLICATE_NO_KEY,
+                        step="8.3",
+                    )
+                    self._log(
+                        "acknowledged duplicate selection popup with Alt+N"
+                    )
+                    return True
+
+            time.sleep(self.poll_interval)
+
+        return False
+
+    def acknowledge_save_as_overwrite_popup(
+        self,
+        *,
+        timeout: float = 3.0,
+    ) -> bool:
+        """Answer Yes when Windows asks to overwrite an existing PDF."""
+
+        from pywinauto import Desktop
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            windows: list[Any] = []
+            try:
+                windows.extend(self._windows_for_process())
+            except AutomationError:
+                pass
+            try:
+                windows.extend(
+                    Desktop(backend=self.backend).windows(
+                        visible_only=True,
+                        enabled_only=False,
+                    )
+                )
+            except Exception:
+                pass
+
+            seen_handles: set[int] = set()
+            for window in windows:
+                try:
+                    handle = int(window.handle)
+                except Exception:
+                    handle = 0
+                if handle and handle in seen_handles:
+                    continue
+                if handle:
+                    seen_handles.add(handle)
+
+                elements = self._elements_in_scope(window, depth=4)
+                text = " ".join(
+                    self._element_name(element)
+                    for element in elements
+                    if self._element_name(element)
+                ).casefold()
+                if not any(
+                    phrase.casefold() in text
+                    for phrase in SAVE_AS_OVERWRITE_TEXTS
+                ):
+                    continue
+
+                for element in elements:
+                    info = element.element_info
+                    control_type = str(
+                        getattr(info, "control_type", "") or ""
+                    ).casefold()
+                    name = self._element_name(element).replace("&", "")
+                    if control_type == "button" and name.casefold() == "yes":
+                        try:
+                            element.click_input()
+                        except Exception as exc:
+                            raise AutomationError(
+                                "save_as_overwrite_ack_failed",
+                                step="9.1",
+                            ) from exc
+                        self._log(
+                            "acknowledged existing PDF overwrite with Yes"
+                        )
+                        return True
+
+                self.send_focused_keys(
+                    SAVE_AS_OVERWRITE_YES_KEY,
+                    step="9.1",
+                )
+                self._log(
+                    "acknowledged existing PDF overwrite with Alt+Y"
+                )
+                return True
+
+            time.sleep(self.poll_interval)
+
+        return False
+
     def send_keys(self, spec: ControlSpec, keys: str) -> None:
         """Type into an already-focused control without re-clicking it."""
 
@@ -600,6 +887,25 @@ class SmartAdvisorDriver:
         except Exception as exc:
             raise AutomationError("send_keys_failed", step=step) from exc
         self._log(f"keys focused {keys}")
+
+    def paste_focused_text(self, value: str, *, step: str) -> None:
+        """Paste literal text into the focused control via the clipboard."""
+
+        if not value:
+            return
+
+        started = time.perf_counter()
+        try:
+            _write_clipboard_text(value)
+            from pywinauto.keyboard import send_keys
+
+            send_keys("^v")
+        except Exception as exc:
+            raise AutomationError("paste_failed", step=step) from exc
+        self._log(
+            f"paste focused text len={len(value)} "
+            f"elapsed={time.perf_counter() - started:.3f}s"
+        )
 
     @staticmethod
     def _element_name(element: Any) -> str:
@@ -979,6 +1285,56 @@ class SmartAdvisorDriver:
             )
         except Exception as exc:
             raise AutomationError("input_failed", step=spec.step) from exc
+
+    def input_child_edit_text(self, spec: ControlSpec, value: str) -> None:
+        """Type into an edit's inner WinForms EDIT child when one exists."""
+
+        parent = self.resolve(spec)
+        target = parent
+        try:
+            children = parent.descendants(depth=1)
+        except Exception:
+            try:
+                children = parent.children()
+            except Exception:
+                children = []
+
+        for child in children:
+            info = getattr(child, "element_info", None)
+            control_type = str(
+                getattr(info, "control_type", "") or ""
+            ).casefold()
+            if (
+                control_type == "edit"
+                and self._safe_state(child, "is_visible")
+                and self._safe_state(child, "is_enabled")
+            ):
+                target = child
+                break
+
+        try:
+            target.set_focus()
+            target.click_input()
+        except Exception:
+            pass
+
+        try:
+            target.set_edit_text(value)
+            self._log(f"input-child {self._describe(spec)} {value}")
+            return
+        except Exception:
+            pass
+
+        try:
+            target.type_keys("^a{BACKSPACE}", set_foreground=True)
+            target.type_keys(
+                value,
+                with_spaces=True,
+                set_foreground=True,
+            )
+        except Exception as exc:
+            raise AutomationError("input_child_failed", step=spec.step) from exc
+        self._log(f"keys-child {self._describe(spec)} {value}")
 
     def scan_texts(
         self,

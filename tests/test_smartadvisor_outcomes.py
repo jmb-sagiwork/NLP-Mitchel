@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from smartadvisor_automation.workflow import (
     NoBillOnFileWorkflow,
+    bill_document_name,
     build_reply_template,
     extract_denial_code,
     extract_history_details,
@@ -127,11 +128,13 @@ class _StatusDriver:
 
 
 class _StatusWorkflow(NoBillOnFileWorkflow):
-    def __init__(self, paid_amount):
+    def __init__(self, paid_amount, denied_codes=("C56", "U02")):
         super().__init__(_StatusDriver())
         self.paid_amount = paid_amount
+        self.denied_codes = denied_codes
         self.tabs = []
         self.opened = 0
+        self.eor_calls = []
 
     def _open_selected_bill(self):
         self.opened += 1
@@ -149,7 +152,17 @@ class _StatusWorkflow(NoBillOnFileWorkflow):
         return "08/20/2026"
 
     def _read_lines_denied_codes(self):
-        return "C56", "U02"
+        return self.denied_codes
+
+    def _open_print_eor_window(self):
+        self.eor_calls.append("open")
+
+    def _prepare_print_eor_selection(self, row_details):
+        self.eor_calls.append(("prepare", row_details["Bill no"]))
+
+    def _save_export_report_pdf(self, row_details):
+        self.eor_calls.append(("save", row_details["Bill no"]))
+        return rf"C:\EOR's\{row_details['Bill no']}.pdf"
 
 
 def _resolve_status(workflow):
@@ -159,7 +172,11 @@ def _resolve_status(workflow):
         expected_amount="527.00",
         amount="527.00",
         row_index=0,
-        row_details={"Patient Account": "PATIENT-9"},
+        row_details={
+            "Client": "CLIENT",
+            "Bill no": "BILL-77",
+            "Patient Account": "PATIENT-9",
+        },
     )
 
 
@@ -172,6 +189,23 @@ def test_zero_paid_amount_uses_history_then_lines_denial_flow():
     assert result.denial_code == "C56, U02"
     assert workflow.opened == 1
     assert workflow.tabs == ["History", "Lines"]
+    assert workflow.eor_calls == [
+        "open",
+        ("prepare", "BILL-77"),
+        ("save", "BILL-77"),
+    ]
+    assert result.eor_pdf_path == r"C:\EOR's\BILL-77.pdf"
+
+
+def test_zero_paid_amount_without_denial_codes_does_not_save_eor():
+    workflow = _StatusWorkflow("0.00", denied_codes=("", ""))
+
+    result = _resolve_status(workflow)
+
+    assert result.disposition == "denied"
+    assert result.denial_code is None
+    assert result.eor_pdf_path is None
+    assert workflow.eor_calls == []
 
 
 def test_nonzero_paid_amount_uses_history_then_header_payment_flow():
@@ -184,3 +218,19 @@ def test_nonzero_paid_amount_uses_history_then_header_payment_flow():
     assert result.check_number == "CHK-77421"
     assert workflow.opened == 1
     assert workflow.tabs == ["History", "Header"]
+    assert workflow.eor_calls == [
+        "open",
+        ("prepare", "BILL-77"),
+        ("save", "BILL-77"),
+    ]
+    assert result.eor_pdf_path == r"C:\EOR's\BILL-77.pdf"
+
+
+def test_eor_path_uses_client_and_bill_with_safe_filename(monkeypatch, tmp_path):
+    workflow = _StatusWorkflow("527.00")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    path = workflow._eor_pdf_path({"Client": "A:C", "Bill no": "B/7"})
+
+    assert bill_document_name({"Client": "A:C", "Bill no": "B/7"}) == "A:C-B/7"
+    assert path == tmp_path / "SmartAdvisorAutomation" / "EOR's" / "A-C-B-7.pdf"

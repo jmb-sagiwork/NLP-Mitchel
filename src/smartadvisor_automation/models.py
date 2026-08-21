@@ -86,6 +86,7 @@ class WorkflowResult:
     paid_date: str | None = None
     check_number: str | None = None
     denial_code: str | None = None
+    eor_pdf_path: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

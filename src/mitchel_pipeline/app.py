@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import json
 import queue
 import threading
 import tkinter as tk
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from tkinter import messagebox, ttk
 
 from incontact_automation import IncontactExtractor
@@ -11,6 +12,121 @@ from incontact_automation import IncontactExtractor
 from .models import ExtractedEmail, PipelineEvent
 from .orchestrator import PipelineOrchestrator
 from .run_control import RunControl
+
+
+_NLP_STATUS_LABELS = {
+    "CLASSIFIED": "Classified",
+    "AMBIGUOUS": "Needs review",
+    "UNCLASSIFIED": "Not classified",
+    "ERROR": "Error",
+}
+
+_NLP_FIELD_LABELS = {
+    "claim_id": "Claim number",
+    "date_of_service": "Date of service",
+    "expected_amount": "Billed amount",
+    "patient_account": "Patient account",
+    "provider_tin": "Provider TIN",
+    "date_of_injury": "Date of injury",
+    "date_of_birth": "Date of birth",
+}
+
+
+def _friendly_nlp_value(field_name: str, value: object) -> str:
+    text = str(value).strip()
+    if field_name == "expected_amount":
+        try:
+            return f"${Decimal(text):,.2f}"
+        except (InvalidOperation, ValueError):
+            return text
+    if field_name.startswith("date_"):
+        try:
+            return datetime.strptime(text, "%Y-%m-%d").strftime("%m/%d/%Y")
+        except ValueError:
+            return text
+    return text
+
+
+def format_nlp_output(result: dict[str, object]) -> str:
+    """Render the NLP callback as an operator-friendly summary, never JSON."""
+
+    status = str(result.get("status") or "").upper()
+    if status == "ERROR":
+        error_code = str(result.get("error_code") or "Unknown error")
+        return (
+            "The email could not be analyzed.\n\n"
+            "Status: Error\n"
+            "Manual review required: Yes\n"
+            f"Error: {error_code}"
+        )
+
+    lines = [
+        "Email analysis complete",
+        "",
+        f"Concern: {result.get('display_name') or 'Not identified'}",
+        f"Status: {_NLP_STATUS_LABELS.get(status, status.title() or 'Unknown')}",
+    ]
+    confidence = result.get("confidence")
+    if isinstance(confidence, (int, float)):
+        lines.append(f"Confidence: {confidence:.0%}")
+    lines.append(
+        "Manual review required: "
+        + ("Yes" if bool(result.get("needs_review")) else "No")
+    )
+    reason = result.get("reason_display_name")
+    if reason:
+        lines.append(f"Reason: {reason}")
+
+    extracted: list[str] = []
+    field_labels: dict[str, str] = {}
+    fields = result.get("fields")
+    if isinstance(fields, dict):
+        for field_name, raw_field in fields.items():
+            name = str(field_name)
+            if not isinstance(raw_field, dict):
+                continue
+            label = str(
+                raw_field.get("display_name")
+                or _NLP_FIELD_LABELS.get(name)
+                or name.replace("_", " ").title()
+            )
+            field_labels[name] = label
+            raw_values = raw_field.get("values")
+            values = (
+                list(raw_values)
+                if isinstance(raw_values, (list, tuple))
+                else []
+            )
+            if not values and raw_field.get("value") not in (None, ""):
+                values = [raw_field["value"]]
+            clean_values = [
+                _friendly_nlp_value(name, value)
+                for value in values
+                if value not in (None, "")
+            ]
+            if clean_values:
+                extracted.append(f"{label}: {', '.join(clean_values)}")
+
+    lines.extend(["", "Extracted information:"])
+    lines.extend(extracted or ["No information was extracted."])
+
+    missing = result.get("missing_fields")
+    if isinstance(missing, (list, tuple)) and missing:
+        labels = [
+            field_labels.get(str(name), _NLP_FIELD_LABELS.get(str(name), str(name)))
+            for name in missing
+        ]
+        lines.extend(["", f"Missing required information: {', '.join(labels)}"])
+
+    ambiguous = result.get("ambiguous_fields")
+    if isinstance(ambiguous, (list, tuple)) and ambiguous:
+        labels = [
+            field_labels.get(str(name), _NLP_FIELD_LABELS.get(str(name), str(name)))
+            for name in ambiguous
+        ]
+        lines.extend(["", f"Please verify: {', '.join(labels)}"])
+
+    return "\n".join(lines)
 
 
 class MitchelApp:
@@ -126,7 +242,7 @@ class MitchelApp:
             return
         self._blocking_messagebox(
             "NLP output",
-            json.dumps(result, indent=2, ensure_ascii=False, default=str),
+            format_nlp_output(result),
         )
 
     def _show_reply(self, reply: str) -> None:

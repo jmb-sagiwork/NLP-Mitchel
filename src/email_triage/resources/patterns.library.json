@@ -1,6 +1,6 @@
 {
-  "library_version": "0.4.0",
-  "_note": "Curated, reviewed regexes referenced from concerns.json by pattern_ref, so config authors never write raw regex. Shapes are STARTING GUESSES until real emails confirm them (pipeline SP-1.1-07/38). Where several fields share one pattern - DOS, DOI and DOB all use us_date - the field MUST set require_label:true, or a bare match cannot be attributed to any of them.",
+  "library_version": "0.4.1",
+  "_note": "Curated, reviewed regexes referenced from concerns.json by pattern_ref, so config authors never write raw regex. Shapes are STARTING GUESSES until real emails confirm them (pipeline SP-1.1-07/38). DOS uses service_date for ranges; DOI and DOB use us_date. Date fields MUST set require_label:true, or a bare match cannot be attributed safely.",
   "patterns": {
     "us_date": {
       "description": "US date. Accepts / . and - as separators, two- or four-digit years, ISO, and spelled months.",
@@ -16,6 +16,19 @@
         "3-4-26"
       ]
     },
+    "service_date": {
+      "description": "Date of service. Accepts one US date or a date range and captures the complete range so the service-date normalizer can choose the earliest date.",
+      "regex": "\\b((?:\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4})(?:\\s*(?:-|–|—|to|through)\\s*(?:\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{4}))?)\\b",
+      "flags": [
+        "IGNORECASE"
+      ],
+      "capture_group": 1,
+      "example_matches": [
+        "05/30/2026",
+        "05/30/2026-06/02/2026",
+        "Jun 2, 2026 through May 30, 2026"
+      ]
+    },
     "currency_amount": {
       "description": "US dollar amount, optional $ and thousands separators. A bare integer only counts as money when a $ immediately precedes it, so '42 miles' is not an amount. The comma/decimal forms are listed first so they win over the bare-integer branch - an earlier version put '$\\s?\\d+' inside the group, which let a leftmost match starting on the preceding space capture just '$1' out of '$1,250.00'. See pipeline SP-1.1-39.",
       "regex": "(?<![\\w.])\\$?[ \\t]{0,25}(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{2})?|\\d+\\.\\d{2}|(?<=\\$)\\d+|(?<=\\$\\s)\\d+)(?!\\d)",
@@ -29,8 +42,8 @@
       ]
     },
     "claim_id": {
-      "description": "Carrier claim id. Optional 1-4 letter prefix, 6-14 digits, and an optional -N suffix (5513778-1).",
-      "regex": "\\b([A-Z]{1,4}[-\\s]?\\d{6,14}(?:-\\d{1,3})?|\\d{7,14}(?:-\\d{1,3})?)\\b",
+      "description": "Carrier claim id. Supports letter prefixes, numeric IDs, optional -N suffixes, and 7-digit carrier IDs containing a letter marker before their check digit (4184847CMT1).",
+      "regex": "\\b([A-Z]{1,4}[-\\s]?\\d{6,14}(?:-\\d{1,3})?|\\d{7}[A-Z]{1,8}\\d{1,3}|\\d{7,14}(?:-\\d{1,3})?)\\b",
       "flags": [
         "IGNORECASE"
       ],
@@ -38,7 +51,8 @@
       "example_matches": [
         "WC1234567",
         "ABC-00456789",
-        "100234567"
+        "100234567",
+        "4184847CMT1"
       ]
     },
     "patient_account": {

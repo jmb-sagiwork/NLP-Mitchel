@@ -35,6 +35,7 @@ BILL_PENDED_WARNING_OK_NAME = "&OK"
 # is the expensive case. It sits directly on its own dialog window, so a
 # shallow walk finds it and a miss costs seconds rather than tens of seconds.
 BILL_PENDED_WARNING_SEARCH_DEPTH = 3
+SCOPE_SEARCH_DEPTH = 2
 
 # The opened bill. Its Name embeds the bill number and DCN, so it is never
 # matched on Name. It is non-modal, which is why Ctrl+O can start the next
@@ -117,6 +118,45 @@ LINES_BRADJ_MSG_ROW_COPY_INDEX = 14
 LINES_FIRST_ROW_CLICK_Y = 46
 LINES_ROW_HEIGHT = 21
 LINES_DENIED_CODE_MAX_ROWS = 80
+
+PRINT_EOR_WINDOW_AUTOMATION_ID = "frmBillBatch"
+PRINT_EOR_WINDOW_NAME = "Print Explanation of Review"
+PRINT_EOR_KEYS = "^p"
+PRINT_EOR_LIST_RADIO_AUTOMATION_ID = "_optChooseBy_1"
+PRINT_EOR_BILL_NO_RADIO_AUTOMATION_ID = "_optChooseBy_3"
+PRINT_EOR_BILL_LIST_AUTOMATION_ID = "txtBillList"
+PRINT_EOR_BILL_LIST_COMMIT_KEYS = "{ENTER}"
+PRINT_EOR_ADD_BUTTON_AUTOMATION_ID = "cmdAdd"
+PRINT_EOR_ADD_BUTTON_NAME = "&Add ->"
+PRINT_EOR_ADD_FALLBACK_KEYS = "%a"
+PRINT_EOR_OK_BUTTON_NAME = "&OK"
+PRINT_EOR_OK_FALLBACK_KEYS = "%o"
+PRINT_EOR_DUPLICATE_SELECTION_TEXT = "already in the selection list"
+PRINT_EOR_DUPLICATE_NO_KEY = "%n"
+PRINT_SETUP_WINDOW_AUTOMATION_ID = "frmPrintSetup"
+PRINT_SETUP_WINDOW_NAME = "Print Setup"
+PRINT_SETUP_FILE_RADIO_AUTOMATION_ID = "_optSpool_2"
+PRINT_SETUP_FILE_RADIO_NAME = "File"
+PRINT_SETUP_FILE_FALLBACK_KEYS = "%f"
+PRINT_SETUP_OK_BUTTON_NAME = "&OK"
+EXPORT_REPORT_WINDOW_NAME = "Export Report"
+EXPORT_REPORT_BROWSE_AUTOMATION_ID = "_cmdBrowse_0"
+EXPORT_REPORT_BROWSE_BUTTON_NAME = "..."
+EXPORT_REPORT_OK_BUTTON_NAME = "&OK"
+EXPORT_REPORT_OK_KEYS = "%o"
+SAVE_AS_WINDOW_NAME = "Save As"
+SAVE_AS_FILENAME_KEYS = "%n"
+SAVE_AS_SAVE_KEYS = "%s"
+SAVE_AS_REVIEW_DELAY_SECONDS = 1.0
+SAVE_AS_OVERWRITE_TEXTS = (
+    "already exists",
+    "replace it",
+    "already present",
+)
+SAVE_AS_OVERWRITE_YES_KEY = "%y"
+EOR_OUTPUT_DIRECTORY_NAME = "EOR's"
+EOR_PDF_PATH_DETAIL_KEY = "EOR PDF Path"
+RAD_MESSAGEBOX_AUTOMATION_ID = "RadMessageBox"
 
 SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT = "Unhandled exception has occurred"
 SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME = "Continue"
@@ -228,6 +268,97 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         label="Lines grid denial messages",
         action="extract",
         scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.9",
+        automation_id=PRINT_EOR_WINDOW_AUTOMATION_ID,
+        label="Print Explanation of Review",
+        action="focus",
+        name=PRINT_EOR_WINDOW_NAME,
+        control_type="Window",
+        search_depth=SCOPE_SEARCH_DEPTH,
+    ),
+    ControlSpec(
+        step="8.0",
+        automation_id=PRINT_EOR_LIST_RADIO_AUTOMATION_ID,
+        label="Print EOR List option",
+        action="click",
+        scope_automation_id=PRINT_EOR_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.1",
+        automation_id=PRINT_EOR_BILL_NO_RADIO_AUTOMATION_ID,
+        label="Print EOR Bill No option",
+        action="click",
+        scope_automation_id=PRINT_EOR_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.2",
+        automation_id=PRINT_EOR_BILL_LIST_AUTOMATION_ID,
+        label="Print EOR bill list",
+        action="input",
+        scope_automation_id=PRINT_EOR_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.3",
+        automation_id=PRINT_EOR_ADD_BUTTON_AUTOMATION_ID,
+        label="Print EOR Add",
+        action="click",
+        name=PRINT_EOR_ADD_BUTTON_NAME,
+        control_type="Button",
+        scope_automation_id=PRINT_EOR_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.4",
+        automation_id="",
+        label="Print EOR OK",
+        action="click",
+        name=PRINT_EOR_OK_BUTTON_NAME,
+        control_type="Button",
+        scope_automation_id=PRINT_EOR_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.5",
+        automation_id=PRINT_SETUP_WINDOW_AUTOMATION_ID,
+        label="Print Setup",
+        action="focus",
+        name=PRINT_SETUP_WINDOW_NAME,
+        control_type="Window",
+        search_depth=SCOPE_SEARCH_DEPTH,
+    ),
+    ControlSpec(
+        step="8.6",
+        automation_id=PRINT_SETUP_FILE_RADIO_AUTOMATION_ID,
+        label="Print Setup File option",
+        action="click",
+        control_type="RadioButton",
+        scope_automation_id=PRINT_SETUP_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.7",
+        automation_id="",
+        label="Print Setup OK",
+        action="click",
+        name=PRINT_SETUP_OK_BUTTON_NAME,
+        control_type="Button",
+        scope_automation_id=PRINT_SETUP_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="8.8",
+        automation_id="",
+        label="Export Report",
+        action="focus",
+        name=EXPORT_REPORT_WINDOW_NAME,
+        control_type="Window",
+        search_depth=SCOPE_SEARCH_DEPTH,
+    ),
+    ControlSpec(
+        step="8.9",
+        automation_id=EXPORT_REPORT_BROWSE_AUTOMATION_ID,
+        label="Export Report browse",
+        action="click",
+        name=EXPORT_REPORT_BROWSE_BUTTON_NAME,
+        control_type="Button",
     ),
 )
 

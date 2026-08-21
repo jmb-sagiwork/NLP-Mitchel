@@ -1,7 +1,7 @@
 {
- "config_version": "0.4.2",
+ "config_version": "0.4.3",
  "schema_version": "1.1.0",
- "updated": "2026-08-19",
+ "updated": "2026-08-21",
  "_TAXONOMY_SOURCE": "Concerns, reasons and the seven extraction fields come from the user's operational list. Two levels: CONCERN is what the item is about (Bill Status, Claim Information); REASON is the sub-classification within it. 0.3.0 applied the rules derived from 15 real inbound emails - see SAMPLE_RULES.md and samples.xlsx column M.",
  "_OPEN_QUESTION": "SETTLED 2026-08-19 against 15 real emails: the reasons ARE dispositions, recorded after an agent looks the bill up, and inbound mail states none of them. Reason was blank on 14 of 15 samples; the only one that fired was 'Claim number request', which is the sole reason phrased as a request. Reason output is therefore ADVISORY. Concern and field extraction are the reliable outputs. Re-cutting reasons into things an email can actually say is still open - see SAMPLE_RULES.md Finding 1.",
  "_FIELD_REQUIREDNESS_ASSUMPTION": "RESOLVED 2026-08-19 by the user: on Bill Status, claim_id, date_of_service and expected_amount are REQUIRED - these are the three an agent cannot action a bill without. Everything else stays optional. On Claim Information nothing is required, because that concern is the sender asking to BE GIVEN the claim number; requiring it would flag every such email by definition.",
@@ -54,7 +54,7 @@
    "Acknowledging receipt of your message below."
   ]
  },
- "_SHARED_FIELDS_NOTE": "DOS, DOI and DOB all resolve to the us_date pattern, and claim_id / patient_account / provider_tin all match digit runs. Every one of them sets require_label:true - without it the first date in the body would be assigned to all three date fields. See pipeline SP-1.1-38.",
+ "_SHARED_FIELDS_NOTE": "DOS uses the range-aware service_date pattern; DOI and DOB use us_date. Claim ID, patient account and provider TIN still overlap on digit runs. Every field sets require_label:true so unrelated dates and identifiers are not assigned to it. See pipeline SP-1.1-38.",
  "concerns": [
   {
    "id": "bill_status",
@@ -488,9 +488,11 @@
      "name": "date_of_service",
      "display_name": "DOS (Date of Service)",
      "required": true,
-     "pattern_ref": "us_date",
+     "pattern_ref": "service_date",
      "require_label": true,
      "label_aliases": [
+      "date(s) of service as billed",
+      "date(s) of service",
       "date of service",
       "service date",
       "dos",
@@ -498,7 +500,7 @@
       "date service",
       "svc date"
      ],
-     "normalizer": "date_iso",
+     "normalizer": "service_date",
      "multi_value": true
     },
     {
@@ -551,6 +553,7 @@
       "expected amount",
       "input - expected amount",
       "expected",
+      "billed amount(s)",
       "billed amount",
       "charge amount",
       "amount",
@@ -812,9 +815,11 @@
      "name": "date_of_service",
      "display_name": "DOS (Date of Service)",
      "required": false,
-     "pattern_ref": "us_date",
+     "pattern_ref": "service_date",
      "require_label": true,
      "label_aliases": [
+      "date(s) of service as billed",
+      "date(s) of service",
       "date of service",
       "service date",
       "dos",
@@ -822,7 +827,7 @@
       "date service",
       "svc date"
      ],
-     "normalizer": "date_iso",
+     "normalizer": "service_date",
      "multi_value": true
     },
     {
@@ -875,6 +880,7 @@
       "expected amount",
       "input - expected amount",
       "expected",
+      "billed amount(s)",
       "billed amount",
       "charge amount",
       "amount",
@@ -933,5 +939,5 @@
    ]
   }
  ],
- "_MULTI_VALUE_NOTE": "date_of_service and expected_amount are multi_value: one email routinely covers several dates of service, each with its own billed amount. Several values in those two fields is the normal case and is NOT flagged as ambiguous. When a date and an amount appear on the same line the pairing is kept in result.line_items, because which amount belongs to which date is the part an agent cannot reconstruct from two flat lists."
+ "_MULTI_VALUE_NOTE": "date_of_service and expected_amount are multi_value: one email routinely covers several dates of service, each with its own billed amount. A single DOS range resolves to its earliest date; separate DOS entries remain separate values. Several values in those two fields is the normal case and is NOT flagged as ambiguous. When a date and an amount appear on the same line the pairing is kept in result.line_items, because which amount belongs to which date is the part an agent cannot reconstruct from two flat lists."
 }
