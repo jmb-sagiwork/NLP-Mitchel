@@ -57,6 +57,16 @@ OUTCOME_MESSAGE = (
     "There is not a bill on file that matches this date of service and "
     "billed amount. Please resubmit the bill with medical reports to:"
 )
+NO_CLAIM_ON_FILE_EMAIL_INTRO = (
+    "Hello, Thank you for your inquiry, unfortunitely additional information "
+    "is need insurance carrier."
+)
+NO_CLAIM_ON_FILE_REQUEST_FIELDS = (
+    ("Claim #:", "claim_id"),
+    ("Date of service:", "dos_from"),
+    ("Total Billed Amount :", "expected_amount"),
+    ("Provider Tax ID :", "prov_tin"),
+)
 MAX_ITERATIONS = 500
 HISTORY_TAB_READY_TIMEOUT = 25.0
 MINIMUM_SUCCESSFUL_SEARCH_FIELDS = 2
@@ -520,21 +530,23 @@ def build_reply_template(
 ) -> str:
     header = "To: Requestor\nSubject: Bill Status Response\n\n"
     if disposition == "no_claim_on_file":
-        identifiers = ", ".join(
-            f"{label} {value}"
-            for label, value in (
-                ("claim", claim_id),
-                ("DOS", dos_from),
-                ("Prov TIN", prov_tin),
-                ("Patient Account", patient_account),
-            )
-            if value
-        ) or "the information provided"
-        return (
-            header + "Concern: No Claim on File\n\n"
-            + f"There is no claim on file matching {identifiers}.\n"
-            + "Please verify the details and resubmit if this claim should be on file."
+        provided_values = {
+            "claim_id": claim_id,
+            "dos_from": dos_from,
+            "expected_amount": expected_amount,
+            "prov_tin": prov_tin,
+        }
+        missing_fields = [
+            label
+            for label, key in NO_CLAIM_ON_FILE_REQUEST_FIELDS
+            if not str(provided_values.get(key, "")).strip()
+        ]
+        body = (
+            "\n".join([NO_CLAIM_ON_FILE_EMAIL_INTRO, "", *missing_fields])
+            if missing_fields
+            else NO_CLAIM_ON_FILE_EMAIL_INTRO
         )
+        return header + "Concern: No Claim on File\n\n" + body
     if disposition == "no_match":
         return (
             header + "Concern: No Bill on File\n\n"
