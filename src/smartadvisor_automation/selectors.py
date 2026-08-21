@@ -43,6 +43,10 @@ SCOPE_SEARCH_DEPTH = 2
 # matched on Name. It is non-modal, which is why Ctrl+O can start the next
 # candidate while it is still on screen.
 BILL_ENTRY_WINDOW_AUTOMATION_ID = "frmBillEntry"
+STALE_MODAL_WINDOW_AUTOMATION_IDS = (
+    BILL_SEARCH_WINDOW_AUTOMATION_ID,
+    OPEN_BILL_WINDOW_AUTOMATION_ID,
+)
 
 # The bill's tab control. Two things about it drive the design:
 #

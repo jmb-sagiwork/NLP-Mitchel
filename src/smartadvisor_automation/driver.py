@@ -18,6 +18,7 @@ from smartadvisor_automation.probe import (
     matching_spec_elements,
 )
 from smartadvisor_automation.selectors import (
+    BILL_ENTRY_WINDOW_AUTOMATION_ID,
     BILL_SEARCH_FRAME_CONTROL_AUTOMATION_IDS,
     GRID_FIRST_ROW_CLICK_Y,
     GRID_ROW_CLICK_X,
@@ -30,6 +31,7 @@ from smartadvisor_automation.selectors import (
     SMARTADVISOR_EXCEPTION_CONTINUE_BUTTON_NAME,
     SMARTADVISOR_NO_RECORDS_TEXT,
     SMARTADVISOR_UNHANDLED_EXCEPTION_TEXT,
+    STALE_MODAL_WINDOW_AUTOMATION_IDS,
 )
 
 # A scoped selector's container is looked up from the top-level windows.
@@ -776,6 +778,224 @@ class SmartAdvisorDriver:
             time.sleep(self.poll_interval)
 
         return False
+
+    def close_stale_modal_windows(self, *, max_passes: int = 3) -> int:
+        """Best-effort cleanup of old Open Bill/Bill Search modal windows.
+
+        SmartAdvisor's modal dialogs expose a Cancel button with Alt+C. Sending
+        the accelerator only after scoping to the known modal windows avoids
+        touching the main SmartAdvisor frame.
+        """
+
+        closed = 0
+        for _pass in range(max_passes):
+            target: Any | None = None
+            target_id = ""
+
+            for backend in SUPPORTED_BACKENDS:
+                try:
+                    main_window = find_smartadvisor_window(backend)
+                except Exception:
+                    continue
+                if main_window is None:
+                    continue
+
+                process_id = getattr(main_window.element_info, "process_id", None)
+                if process_id is None:
+                    continue
+
+                try:
+                    from pywinauto import Desktop
+
+                    windows = list(
+                        Desktop(backend=backend).windows(
+                            process=int(process_id),
+                            visible_only=True,
+                            enabled_only=False,
+                        )
+                    )
+                except Exception:
+                    continue
+
+                for wanted_id in STALE_MODAL_WINDOW_AUTOMATION_IDS:
+                    for window in windows:
+                        info = getattr(window, "element_info", None)
+                        automation_id = str(
+                            getattr(info, "automation_id", "") or ""
+                        )
+                        if automation_id != wanted_id:
+                            continue
+                        if not self._safe_state(window, "is_visible"):
+                            continue
+                        target = window
+                        target_id = wanted_id
+                        self.backend = backend
+                        self.process_id = int(process_id)
+                        break
+                    if target is not None:
+                        break
+                if target is not None:
+                    break
+
+            if target is None:
+                break
+
+            try:
+                target.set_focus()
+                target.type_keys("%c", set_foreground=True)
+            except Exception:
+                break
+
+            closed += 1
+            self._log(f"fresh-start closed {target_id} with Alt+C")
+            self.invalidate_scopes()
+            time.sleep(0.6)
+
+        return closed
+
+    def close_bill_entry_windows(self, *, max_passes: int = 5) -> int:
+        """Best-effort cleanup of opened bill entry windows.
+
+        Matched claim-status work leaves the bill window open on Header,
+        History, or Lines. This closes only windows identified as frmBillEntry,
+        so the SmartAdvisor main frame remains open for the next run.
+        """
+
+        closed = 0
+        for _pass in range(max_passes):
+            target: Any | None = None
+
+            for backend in SUPPORTED_BACKENDS:
+                try:
+                    main_window = find_smartadvisor_window(backend)
+                except Exception:
+                    continue
+                if main_window is None:
+                    continue
+
+                process_id = getattr(main_window.element_info, "process_id", None)
+                if process_id is None:
+                    continue
+
+                self.backend = backend
+                self.process_id = int(process_id)
+
+                search_batches = (
+                    self._elements_in_scope(main_window, depth=8),
+                    self._elements_in_scope(main_window),
+                )
+                for elements in search_batches:
+                    for element in elements:
+                        info = getattr(element, "element_info", None)
+                        automation_id = str(getattr(info, "automation_id", "") or "")
+                        title = (
+                            self._element_name(element)
+                            or self._element_value(element)
+                        )
+                        if (
+                            automation_id != BILL_ENTRY_WINDOW_AUTOMATION_ID
+                            and not title.startswith("Bill:")
+                        ):
+                            continue
+                        if not self._safe_state(element, "is_visible"):
+                            continue
+                        target = element
+                        break
+                    if target is not None:
+                        break
+                if target is not None:
+                    break
+
+                try:
+                    from pywinauto import Desktop
+
+                    windows = list(
+                        Desktop(backend=backend).windows(
+                            process=int(process_id),
+                            visible_only=True,
+                            enabled_only=False,
+                        )
+                    )
+                except Exception:
+                    continue
+
+                for window in windows:
+                    info = getattr(window, "element_info", None)
+                    automation_id = str(getattr(info, "automation_id", "") or "")
+                    title = self._element_name(window) or self._element_value(window)
+                    if (
+                        automation_id != BILL_ENTRY_WINDOW_AUTOMATION_ID
+                        and not title.startswith("Bill:")
+                    ):
+                        continue
+                    if not self._safe_state(window, "is_visible"):
+                        continue
+                    target = window
+                    break
+                if target is not None:
+                    break
+
+            if target is None:
+                break
+
+            closed_this_pass = False
+            for element in self._elements_in_scope(target, depth=4):
+                info = getattr(element, "element_info", None)
+                control_type = str(getattr(info, "control_type", "") or "").casefold()
+                name = self._element_name(element).strip().replace("&", "")
+                if control_type != "button" or name.casefold() != "close":
+                    continue
+                try:
+                    try:
+                        element.set_focus()
+                    except Exception:
+                        pass
+                    element.click_input()
+                    closed_this_pass = True
+                    break
+                except Exception:
+                    continue
+
+            if not closed_this_pass:
+                try:
+                    target.set_focus()
+                    target.type_keys("^{F4}", set_foreground=True)
+                    closed_this_pass = True
+                except Exception:
+                    try:
+                        target.type_keys("%{F4}", set_foreground=True)
+                        closed_this_pass = True
+                    except Exception:
+                        break
+
+            closed += 1
+            self._log("cleanup closed frmBillEntry")
+            self.invalidate_scopes()
+            time.sleep(0.8)
+
+        return closed
+
+    def close_all_subwindows_for_finish(self) -> int:
+        """Close known SmartAdvisor child windows and leave main open."""
+
+        closed = 0
+        closed += self.close_stale_modal_windows(max_passes=3)
+        closed += self.close_bill_entry_windows(max_passes=5)
+        closed += self.close_stale_modal_windows(max_passes=3)
+        return closed
+
+    @staticmethod
+    def _element_value(element: Any) -> str:
+        try:
+            iface_value = getattr(element, "iface_value", None)
+            if iface_value is not None:
+                return str(iface_value.CurrentValue or "").strip()
+        except Exception:
+            pass
+        try:
+            return str(element.get_value() or "").strip()
+        except Exception:
+            return ""
 
     def acknowledge_duplicate_selection_popup(
         self,

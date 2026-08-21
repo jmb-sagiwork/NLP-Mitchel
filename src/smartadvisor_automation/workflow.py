@@ -167,6 +167,8 @@ class WorkflowDriver(Protocol):
 
     def acknowledge_no_records_popup(self, *, timeout: float = 3.0) -> bool: ...
 
+    def close_all_subwindows_for_finish(self) -> int: ...
+
     def select_tab(
         self,
         spec: ControlSpec,
@@ -598,6 +600,11 @@ class NoBillOnFileWorkflow:
 
     def _open_search_once_for_case(self) -> None:
         self._check_cancelled()
+        self.progress("fresh-start", "Closing old SmartAdvisor subwindows")
+        closed_windows = self.driver.close_all_subwindows_for_finish()
+        if closed_windows:
+            self.log(f"fresh-start closed {closed_windows} subwindow(s)")
+
         self.progress("attach", "Attaching to SmartAdvisor")
         backend = self.driver.attach(CONTROLS_BY_STEP["1"])
         self.log(f"attached backend={backend}")
