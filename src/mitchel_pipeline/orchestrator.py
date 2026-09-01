@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import itertools
 from collections.abc import Callable, Iterable
 from typing import Protocol
@@ -9,6 +10,7 @@ from email_triage import TriageEngine, classify_email
 from .helper_client import SmartAdvisorHelperClient, SmartAdvisorHelperError
 from .jobs import deduplicate_jobs, jobs_from_result
 from .models import ExtractedEmail, PipelineEvent, RunSummary, SmartAdvisorJob
+from .results_workbook import ResultsWorkbook
 from .run_control import RunCancelled, RunControl
 
 EventCallback = Callable[[PipelineEvent], None]
@@ -33,6 +35,14 @@ class Extractor(Protocol):
         progress: Callable[[int, int, str], None],
     ) -> Iterable[ExtractedEmail]: ...
 
+    def send_reply(self, reply_text: str) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class SiteIdLookup(Protocol):
+    def site_id_for_claim(self, claim_number: str) -> str: ...
+
     def close(self) -> None: ...
 
 
@@ -56,6 +66,8 @@ class PipelineOrchestrator:
         *,
         enable_minilm: bool,
         helper: Helper | None = None,
+        salesforce: SiteIdLookup | None = None,
+        results_workbook: ResultsWorkbook | None = None,
         emit: EventCallback | None = None,
         engine: TriageEngine | None = None,
         on_extracted: ExtractedCallback | None = None,
@@ -67,6 +79,8 @@ class PipelineOrchestrator:
         self.extractor = extractor
         self.enable_minilm = enable_minilm
         self.helper = helper or SmartAdvisorHelperClient()
+        self.salesforce = salesforce
+        self.results_workbook = results_workbook or ResultsWorkbook()
         self.emit = emit or (lambda _event: None)
         self.engine = engine
         self.on_extracted = on_extracted or (lambda _email: None)
@@ -158,6 +172,7 @@ class PipelineOrchestrator:
                         }
                     )
                     self.on_reply(MANUAL_REVIEW_REPLY)
+                    self.extractor.send_reply(MANUAL_REVIEW_REPLY)
                     self._event(
                         "summary",
                         summary.display(),
@@ -176,6 +191,7 @@ class PipelineOrchestrator:
                 if not jobs:
                     summary.skipped += 1
                     self.on_reply(MANUAL_REVIEW_REPLY)
+                    self.extractor.send_reply(MANUAL_REVIEW_REPLY)
                     self._event(
                         "summary",
                         summary.display(),
@@ -184,11 +200,24 @@ class PipelineOrchestrator:
                     )
                     continue
 
+                last_reply = MANUAL_REVIEW_REPLY
                 for job_index, job in enumerate(jobs):
                     job_start = slice_start + slice_span * (
                         0.35 + (job_index / len(jobs)) * 0.55
                     )
                     job_span = slice_span * 0.55 / len(jobs)
+
+                    if self.salesforce is not None:
+                        try:
+                            site_id = self.salesforce.site_id_for_claim(job.claim_id)
+                            job = dataclasses.replace(job, site_id=site_id)
+                        except Exception as exc:
+                            self._event(
+                                "status",
+                                f"Salesforce Site ID lookup failed: {type(exc).__name__}",
+                                job_start,
+                            )
+
                     helper_result = self._run_smartadvisor_job(
                         job,
                         control,
@@ -201,7 +230,9 @@ class PipelineOrchestrator:
                         helper_result.get("reply_template")
                         or "SmartAdvisor processing completed."
                     )
+                    last_reply = reply
                     self.on_reply(reply)
+                    self.results_workbook.append_result(job, helper_result, reply_sent=True)
                     self._event(
                         "summary",
                         summary.display(),
@@ -209,6 +240,7 @@ class PipelineOrchestrator:
                         summary.to_dict(),
                     )
 
+                self.extractor.send_reply(last_reply)
                 self._event(
                     "progress",
                     f"Finished email {email_index} of {total}",
@@ -224,6 +256,8 @@ class PipelineOrchestrator:
         finally:
             self.extractor.close()
             self.helper.close()
+            if self.salesforce is not None:
+                self.salesforce.close()
 
     def _run_smartadvisor_job(
         self,

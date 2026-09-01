@@ -1,4 +1,4 @@
-"""Tkinter harness for teaching the triage engine.
+"""PySide6 harness for teaching the triage engine.
 
 This is a teaching tool, not the product. Paste a body, see exactly what the
 NLP concluded and why, then correct it - every saved row becomes a labelled
@@ -11,9 +11,28 @@ with `email_triage.classify_email(body, subject)` and never ships this window.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
-import tkinter as tk
-from tkinter import messagebox, ttk
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QSplitter,
+    QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from email_triage.engine import TriageEngine
 from email_triage.render import (
@@ -26,6 +45,7 @@ from email_triage.render import (
 )
 from email_triage.textprep import separate_transport_headers
 from email_triage.types import TriageResult
+from mitchel_qt.dialogs import show_message as show_error_dialog
 
 from . import theme as th
 from .paths import DATASET_PATH
@@ -134,338 +154,371 @@ def _field_tree_rows(result: TriageResult) -> list[tuple[tuple[str, str, str, st
     return rows
 
 
-class TriageApp:
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
-        self.fonts = th.apply_theme(root)
+def _restyle(widget: QWidget) -> None:
+    """Re-apply QSS after a dynamic `cssClass` property change on a live widget."""
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
+def _dim_label(text: str, fonts: th.Fonts) -> QLabel:
+    label = QLabel(text)
+    th.set_class(label, "dim")
+    label.setFont(fonts.small)
+    return label
+
+
+class TriageApp(QWidget):
+    TAG_COLORS = {
+        "found": th.TEXT,
+        "missing": th.DANGER,
+        "optional_missing": th.TEXT_FAINT,
+        "history": th.WARN,
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fonts = th.apply_theme(QApplication.instance())
         self.engine: TriageEngine | None = None
         self.result: TriageResult | None = None
         self._sample_index = 0
-        self._placeholder_showing = True
         self._queue: queue.Queue = queue.Queue()
 
-        root.title("Email Triage - NLP Demo")
-        # Widened from 1088x688 when the fonts were enlarged (SP-1.1-58): the
-        # type grew ~20% and the old window clipped the teach bar and the tree.
-        root.geometry("1320x840")
-        root.minsize(1080, 700)
+        self.setWindowTitle("Email Triage - NLP Demo")
+        self.resize(1320, 840)
+        self.setMinimumSize(1080, 700)
 
-        self._build_header()
-        self._build_body()
-        self._build_correction_bar()
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        self._show_placeholder()
-        self.root.after(60, self._boot_engine)
-        self.root.after(80, self._drain_queue)
+        self._build_header(root_layout)
+        self._build_body(root_layout)
+        self._build_correction_bar(root_layout)
 
-        root.bind("<Control-Return>", lambda _e: self._analyze())
-        root.bind("<Control-l>", lambda _e: self._clear())
+        self.body_text.setPlaceholderText(PLACEHOLDER)
+        self._reset_output()
+
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=self._analyze)
+        QShortcut(QKeySequence("Ctrl+L"), self, activated=self._clear)
+
+        self._boot_timer = QTimer(self)
+        self._boot_timer.setSingleShot(True)
+        self._boot_timer.timeout.connect(self._boot_engine)
+        self._boot_timer.start(60)
+
+        self._drain_timer = QTimer(self)
+        self._drain_timer.timeout.connect(self._drain_queue)
+        self._drain_timer.start(80)
 
     # ---------------------------------------------------------------- header
 
-    def _build_header(self) -> None:
-        bar = ttk.Frame(self.root, style="TFrame", padding=(18, 14, 18, 11))
-        bar.pack(fill="x")
+    def _build_header(self, root_layout: QVBoxLayout) -> None:
+        bar = QFrame(self)
+        bar_layout = QHBoxLayout(bar)
+        bar_layout.setContentsMargins(18, 14, 18, 11)
 
-        left = ttk.Frame(bar, style="TFrame")
-        left.pack(side="left")
-        ttk.Label(left, text="Email Triage", style="H1.TLabel").pack(anchor="w")
-        ttk.Label(
-            left,
-            text="Concern classification and field extraction  -  runs fully offline",
-            style="Dim.TLabel",
-        ).pack(anchor="w", pady=(2, 0))
+        left = QVBoxLayout()
+        left.setSpacing(2)
+        title = QLabel("Email Triage", bar)
+        title.setFont(self.fonts.h1)
+        left.addWidget(title)
+        subtitle = _dim_label(
+            "Concern classification and field extraction  -  runs fully offline",
+            self.fonts,
+        )
+        left.addWidget(subtitle)
+        bar_layout.addLayout(left)
+        bar_layout.addStretch(1)
 
-        right = ttk.Frame(bar, style="TFrame")
-        right.pack(side="right")
-        self.engine_pill = th.Pill(right, self.fonts, bg=th.BG)
-        self.engine_pill.pack(side="right")
+        self.engine_label = _dim_label("loading engine...", self.fonts)
+        bar_layout.addWidget(self.engine_label)
+        self.engine_pill = th.Pill(bar, self.fonts, bg=th.BG)
         self.engine_pill.set("STARTING", th.NEUTRAL)
-        self.engine_label = ttk.Label(right, text="loading engine...", style="Dim.TLabel")
-        self.engine_label.pack(side="right", padx=(0, 10))
+        bar_layout.addWidget(self.engine_pill)
 
-        ttk.Frame(self.root, style="Divider.TFrame", height=1).pack(fill="x")
+        root_layout.addWidget(bar)
+
+        divider = QFrame(self)
+        th.set_class(divider, "divider")
+        root_layout.addWidget(divider)
 
     # ------------------------------------------------------------------ body
 
-    def _build_body(self) -> None:
-        wrap = ttk.Frame(self.root, style="TFrame", padding=(14, 13, 14, 6))
-        wrap.pack(fill="both", expand=True)
+    def _build_body(self, root_layout: QVBoxLayout) -> None:
+        wrap = QFrame(self)
+        wrap_layout = QVBoxLayout(wrap)
+        wrap_layout.setContentsMargins(14, 13, 14, 6)
+        root_layout.addWidget(wrap, 1)
 
-        split = ttk.Panedwindow(wrap, orient="horizontal", style="Dark.TPanedwindow")
-        split.pack(fill="both", expand=True)
+        split = QSplitter(Qt.Horizontal, wrap)
+        wrap_layout.addWidget(split)
 
-        split.add(self._build_input_panel(split), weight=44)
-        split.add(self._build_output_panel(split), weight=56)
+        input_panel = self._build_input_panel(split)
+        output_panel = self._build_output_panel(split)
+        split.addWidget(input_panel)
+        split.addWidget(output_panel)
+        split.setStretchFactor(0, 44)
+        split.setStretchFactor(1, 56)
+        split.setSizes([580, 740])
 
-    def _build_input_panel(self, parent: tk.Misc) -> ttk.Frame:
-        panel = ttk.Frame(parent, style="Surface.TFrame", padding=13)
+    def _build_input_panel(self, parent: QWidget) -> QWidget:
+        panel = QFrame(parent)
+        th.set_class(panel, "surface")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(13, 13, 13, 13)
 
-        head = ttk.Frame(panel, style="Surface.TFrame")
-        head.pack(fill="x")
-        ttk.Label(head, text="INPUT", style="H2.TLabel").pack(side="left")
-        ttk.Label(
-            head, text="Ctrl+Enter to analyze", style="DimSurface.TLabel"
-        ).pack(side="right")
+        head = QHBoxLayout()
+        head_label = QLabel("INPUT", panel)
+        head_label.setFont(self.fonts.h2)
+        head.addWidget(head_label)
+        head.addStretch(1)
+        head.addWidget(_dim_label("Ctrl+Enter to analyze", self.fonts))
+        layout.addLayout(head)
 
-        ttk.Label(panel, text="Subject (optional)", style="DimSurface.TLabel").pack(
-            anchor="w", pady=(11, 4)
-        )
-        self.subject_var = tk.StringVar()
-        ttk.Entry(
-            panel, textvariable=self.subject_var, style="Dark.TEntry", font=self.fonts.body
-        ).pack(fill="x")
+        layout.addWidget(_dim_label("Subject (optional)", self.fonts))
+        self.subject_edit = QLineEdit(panel)
+        self.subject_edit.setFont(self.fonts.body)
+        layout.addWidget(self.subject_edit)
 
-        ttk.Label(panel, text="Email body", style="DimSurface.TLabel").pack(
-            anchor="w", pady=(11, 4)
-        )
-        holder = ttk.Frame(panel, style="Surface.TFrame")
-        holder.pack(fill="both", expand=True)
-        self.body_text = th.text_widget(holder, self.fonts)
-        sb = ttk.Scrollbar(
-            holder, orient="vertical", command=self.body_text.yview,
-            style="Dark.Vertical.TScrollbar",
-        )
-        self.body_text.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self.body_text.pack(side="left", fill="both", expand=True)
-        self.body_text.bind("<FocusIn>", self._clear_placeholder)
-        self.body_text.tag_configure("placeholder", foreground=th.TEXT_FAINT)
+        layout.addWidget(_dim_label("Email body", self.fonts))
+        self.body_text = QPlainTextEdit(panel)
+        self.body_text.setFont(self.fonts.body)
+        layout.addWidget(self.body_text, 1)
 
-        actions = ttk.Frame(panel, style="Surface.TFrame")
-        actions.pack(fill="x", pady=(11, 0))
-        self.analyze_btn = ttk.Button(
-            actions, text="Analyze", style="Accent.TButton", command=self._analyze
-        )
-        self.analyze_btn.pack(side="left")
-        ttk.Button(
-            actions, text="Load sample", style="Ghost.TButton", command=self._load_sample
-        ).pack(side="left", padx=(6, 0))
-        ttk.Button(
-            actions, text="Clear", style="Ghost.TButton", command=self._clear
-        ).pack(side="left", padx=(6, 0))
+        actions = QHBoxLayout()
+        self.analyze_btn = QPushButton("Analyze", panel)
+        th.set_class(self.analyze_btn, "accent")
+        self.analyze_btn.clicked.connect(self._analyze)
+        actions.addWidget(self.analyze_btn)
+        sample_btn = QPushButton("Load sample", panel)
+        th.set_class(sample_btn, "ghost")
+        sample_btn.clicked.connect(self._load_sample)
+        actions.addWidget(sample_btn)
+        clear_btn = QPushButton("Clear", panel)
+        th.set_class(clear_btn, "ghost")
+        clear_btn.clicked.connect(self._clear)
+        actions.addWidget(clear_btn)
+        actions.addStretch(1)
+        layout.addLayout(actions)
         return panel
 
-    def _build_output_panel(self, parent: tk.Misc) -> ttk.Frame:
-        panel = ttk.Frame(parent, style="TFrame", padding=(11, 0, 0, 0))
+    def _build_output_panel(self, parent: QWidget) -> QWidget:
+        panel = QFrame(parent)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(11, 0, 0, 0)
 
-        self.tabs = ttk.Notebook(panel, style="Dark.TNotebook")
-        self.tabs.pack(fill="both", expand=True)
+        self.tabs = QTabWidget(panel)
+        layout.addWidget(self.tabs)
 
-        self.tabs.add(self._build_summary_tab(self.tabs), text="  Summary  ")
-        self.tabs.add(self._build_text_tab(self.tabs), text="  Plain text  ")
-        self.tabs.add(self._build_json_tab(self.tabs), text="  JSON  ")
-        self.tabs.add(self._build_why_tab(self.tabs), text="  Why this result  ")
+        self.tabs.addTab(self._build_summary_tab(self.tabs), "  Summary  ")
+        self.tabs.addTab(self._build_text_tab(self.tabs), "  Plain text  ")
+        self.tabs.addTab(self._build_json_tab(self.tabs), "  JSON  ")
+        self.tabs.addTab(self._build_why_tab(self.tabs), "  Why this result  ")
         return panel
 
-    def _build_summary_tab(self, parent: tk.Misc) -> ttk.Frame:
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=14)
+    def _build_summary_tab(self, parent: QWidget) -> QWidget:
+        tab = QFrame(parent)
+        th.set_class(tab, "surface")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(14, 14, 14, 14)
 
-        # ---- concern card ------------------------------------------------
-        card = ttk.Frame(tab, style="Card.TFrame", padding=14)
-        card.pack(fill="x")
+        # ---- concern card --------------------------------------------
+        card = QFrame(tab)
+        th.set_class(card, "card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 14, 14, 14)
+        layout.addWidget(card)
 
-        row = ttk.Frame(card, style="Card.TFrame")
-        row.pack(fill="x")
-        ttk.Label(row, text="TYPE OF CONCERN", style="DimCard.TLabel").pack(anchor="w")
-        self.status_pill = th.Pill(row, self.fonts, bg=th.ELEVATED)
-        self.status_pill.place(relx=1.0, y=0, anchor="ne")
+        row = QHBoxLayout()
+        row.addWidget(_dim_label("TYPE OF CONCERN", self.fonts))
+        row.addStretch(1)
+        self.status_pill = th.Pill(card, self.fonts, bg=th.ELEVATED)
+        row.addWidget(self.status_pill)
+        card_layout.addLayout(row)
 
-        self.concern_label = ttk.Label(card, text="-", style="Concern.TLabel")
-        self.concern_label.pack(anchor="w", pady=(4, 2))
-        self.concern_id_label = ttk.Label(card, text="", style="DimCard.TLabel")
-        self.concern_id_label.pack(anchor="w")
+        self.concern_label = QLabel("-", card)
+        self.concern_label.setFont(self.fonts.h1)
+        card_layout.addWidget(self.concern_label)
+        self.concern_id_label = _dim_label("", self.fonts)
+        card_layout.addWidget(self.concern_id_label)
 
-        self.reason_heading = ttk.Label(card, text="REASON", style="DimCard.TLabel")
-        self.reason_heading.pack(anchor="w", pady=(11, 0))
-        self.reason_label = ttk.Label(card, text="-", style="Mono.TLabel")
-        self.reason_label.pack(anchor="w", pady=(2, 0))
+        self.reason_heading = _dim_label("REASON", self.fonts)
+        card_layout.addWidget(self.reason_heading)
+        self.reason_label = QLabel("-", card)
+        self.reason_label.setFont(self.fonts.mono_value)
+        card_layout.addWidget(self.reason_label)
 
-        meter_row = ttk.Frame(card, style="Card.TFrame")
-        meter_row.pack(fill="x", pady=(13, 0))
-        self.meter = th.Meter(meter_row, width=208, bg=th.ELEVATED)
-        self.meter.pack(side="left")
-        self.conf_label = ttk.Label(meter_row, text="", style="Mono.TLabel")
-        self.conf_label.pack(side="left", padx=(10, 0))
-        self.decision_label = ttk.Label(card, text="", style="DimCard.TLabel")
-        self.decision_label.pack(anchor="w", pady=(6, 0))
+        meter_row = QHBoxLayout()
+        self.meter = th.Meter(card, width=208, bg=th.ELEVATED)
+        meter_row.addWidget(self.meter)
+        self.conf_label = QLabel("", card)
+        self.conf_label.setFont(self.fonts.mono_value)
+        meter_row.addWidget(self.conf_label)
+        meter_row.addStretch(1)
+        card_layout.addLayout(meter_row)
 
-        # ---- fields ------------------------------------------------------
-        ttk.Label(tab, text="DATA NEEDED", style="DimSurface.TLabel").pack(
-            anchor="w", pady=(16, 5)
-        )
-        tree_holder = ttk.Frame(tab, style="Surface.TFrame")
-        tree_holder.pack(fill="both", expand=True)
+        self.decision_label = _dim_label("", self.fonts)
+        self.decision_label.setWordWrap(True)
+        card_layout.addWidget(self.decision_label)
 
-        cols = ("field", "value", "req", "source")
-        self.tree = ttk.Treeview(
-            tree_holder, columns=cols, show="headings", style="Dark.Treeview", height=8
-        )
-        for key, label, width, anchor in (
-            # Widened alongside the font bump - repeated field numbering and
-            # "label_proximity:patient account" are the two that set the floor.
-            # "source" stretches into whatever slack the window has.
-            ("field", "FIELD", 170, "w"),
-            ("value", "VALUE", 180, "w"),
-            ("req", "REQUIRED", 90, "center"),
-            ("source", "FOUND VIA", 210, "w"),
-        ):
-            self.tree.heading(key, text=label)
-            self.tree.column(key, width=width, anchor=anchor, stretch=(key == "source"))
-        tsb = ttk.Scrollbar(
-            tree_holder, orient="vertical", command=self.tree.yview,
-            style="Dark.Vertical.TScrollbar",
-        )
-        self.tree.configure(yscrollcommand=tsb.set)
-        tsb.pack(side="right", fill="y")
-        self.tree.pack(side="left", fill="both", expand=True)
+        # ---- fields ----------------------------------------------------
+        layout.addWidget(_dim_label("DATA NEEDED", self.fonts))
 
-        self.tree.tag_configure("found", foreground=th.TEXT)
-        self.tree.tag_configure("missing", foreground=th.DANGER)
-        self.tree.tag_configure("optional_missing", foreground=th.TEXT_FAINT)
-        self.tree.tag_configure("history", foreground=th.WARN)
+        self.tree = QTreeWidget(tab)
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(["FIELD", "VALUE", "REQUIRED", "FOUND VIA"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setColumnWidth(0, 170)
+        self.tree.setColumnWidth(1, 180)
+        self.tree.setColumnWidth(2, 90)
+        self.tree.setColumnWidth(3, 210)
+        self.tree.header().setStretchLastSection(True)
+        layout.addWidget(self.tree, 1)
 
-        self.warn_label = ttk.Label(tab, text="", style="DimSurface.TLabel", wraplength=620)
-        self.warn_label.pack(anchor="w", pady=(8, 0))
+        self.warn_label = _dim_label("", self.fonts)
+        self.warn_label.setWordWrap(True)
+        layout.addWidget(self.warn_label)
         return tab
 
-    def _build_text_tab(self, parent: tk.Misc) -> ttk.Frame:
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=10)
-        self.plain_out, _ = self._readonly_text(tab)
+    def _build_text_tab(self, parent: QWidget) -> QWidget:
+        tab = QFrame(parent)
+        th.set_class(tab, "surface")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.plain_out = self._readonly_text(tab)
+        layout.addWidget(self.plain_out)
         return tab
 
-    def _build_json_tab(self, parent: tk.Misc) -> ttk.Frame:
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=10)
-        self.json_out, _ = self._readonly_text(tab)
-        bar = ttk.Frame(tab, style="Surface.TFrame")
-        bar.pack(fill="x", pady=(8, 0))
-        ttk.Button(
-            bar, text="Copy JSON", style="Ghost.TButton", command=self._copy_json
-        ).pack(side="left")
-        ttk.Label(
-            bar,
-            text="This shape is what a host system consumes, and what training rows embed.",
-            style="DimSurface.TLabel",
-        ).pack(side="left", padx=(10, 0))
+    def _build_json_tab(self, parent: QWidget) -> QWidget:
+        tab = QFrame(parent)
+        th.set_class(tab, "surface")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.json_out = self._readonly_text(tab)
+        layout.addWidget(self.json_out)
+
+        bar = QHBoxLayout()
+        copy_btn = QPushButton("Copy JSON", tab)
+        th.set_class(copy_btn, "ghost")
+        copy_btn.clicked.connect(self._copy_json)
+        bar.addWidget(copy_btn)
+        bar.addWidget(_dim_label(
+            "This shape is what a host system consumes, and what training rows embed.",
+            self.fonts,
+        ))
+        bar.addStretch(1)
+        layout.addLayout(bar)
         return tab
 
-    def _build_why_tab(self, parent: tk.Misc) -> ttk.Frame:
-        """The narrated version of the JSON: which rule fired, and what it beat.
+    def _build_why_tab(self, parent: QWidget) -> QWidget:
+        """The narrated version of the JSON: which rule fired, and what it beat."""
+        tab = QFrame(parent)
+        th.set_class(tab, "surface")
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.why_out = self._readonly_text(tab)
+        layout.addWidget(self.why_out)
 
-        Everything shown here is already in `result.explanation`; the tab exists
-        because reading a fused score off a table is not the same as being told
-        why the concern won and why the reason was or was not stated.
-        """
-        tab = ttk.Frame(parent, style="Surface.TFrame", padding=10)
-        self.why_out, _ = self._readonly_text(tab)
-        bar = ttk.Frame(tab, style="Surface.TFrame")
-        bar.pack(fill="x", pady=(8, 0))
-        ttk.Button(
-            bar, text="Copy explanation", style="Ghost.TButton", command=self._copy_why
-        ).pack(side="left")
-        ttk.Label(
-            bar,
-            text="Disagree with any step below? Correct it in the TEACH bar and save.",
-            style="DimSurface.TLabel",
-        ).pack(side="left", padx=(10, 0))
+        bar = QHBoxLayout()
+        copy_btn = QPushButton("Copy explanation", tab)
+        th.set_class(copy_btn, "ghost")
+        copy_btn.clicked.connect(self._copy_why)
+        bar.addWidget(copy_btn)
+        bar.addWidget(_dim_label(
+            "Disagree with any step below? Correct it in the TEACH bar and save.",
+            self.fonts,
+        ))
+        bar.addStretch(1)
+        layout.addLayout(bar)
         return tab
 
-    def _readonly_text(self, parent: tk.Misc) -> tuple[tk.Text, ttk.Scrollbar]:
-        holder = ttk.Frame(parent, style="Surface.TFrame")
-        holder.pack(fill="both", expand=True)
-        widget = th.text_widget(holder, self.fonts, mono=True)
-        sb = ttk.Scrollbar(
-            holder, orient="vertical", command=widget.yview,
-            style="Dark.Vertical.TScrollbar",
-        )
-        widget.configure(yscrollcommand=sb.set, state="disabled")
-        sb.pack(side="right", fill="y")
-        widget.pack(side="left", fill="both", expand=True)
-        return widget, sb
+    def _readonly_text(self, parent: QWidget) -> QPlainTextEdit:
+        widget = QPlainTextEdit(parent)
+        widget.setReadOnly(True)
+        widget.setFont(self.fonts.mono)
+        return widget
 
     # -------------------------------------------------------- correction bar
 
-    def _build_correction_bar(self) -> None:
-        ttk.Frame(self.root, style="Divider.TFrame", height=1).pack(fill="x")
-        # Tighter than a flat 0.8x of the original padding: the NEW row below
-        # has to fit inside the same 688px window when it unfolds.
-        wrap = ttk.Frame(self.root, style="TFrame", padding=(18, 8, 18, 10))
-        wrap.pack(fill="x")
+    def _build_correction_bar(self, root_layout: QVBoxLayout) -> None:
+        divider = QFrame(self)
+        th.set_class(divider, "divider")
+        root_layout.addWidget(divider)
 
-        bar = ttk.Frame(wrap, style="TFrame")
-        bar.pack(fill="x")
+        wrap = QFrame(self)
+        wrap_layout = QVBoxLayout(wrap)
+        wrap_layout.setContentsMargins(18, 8, 18, 10)
+        root_layout.addWidget(wrap)
 
-        ttk.Label(bar, text="TEACH", style="Dim.TLabel").pack(side="left", padx=(0, 11))
+        bar = QHBoxLayout()
+        wrap_layout.addLayout(bar)
 
-        ttk.Label(bar, text="Correct concern:", style="Dim.TLabel").pack(side="left")
-        self.correction_var = tk.StringVar()
-        self.correction_box = ttk.Combobox(
-            bar, textvariable=self.correction_var, state="readonly",
-            style="Dark.TCombobox", width=22, font=self.fonts.body,
-        )
-        self.correction_box.pack(side="left", padx=(6, 13))
-        self.correction_box.bind("<<ComboboxSelected>>", self._toggle_new_label_row)
+        bar.addWidget(_dim_label("TEACH", self.fonts))
 
-        ttk.Label(bar, text="Reason:", style="Dim.TLabel").pack(side="left")
-        self.reason_correction_var = tk.StringVar()
-        self.reason_correction_box = ttk.Combobox(
-            bar, textvariable=self.reason_correction_var, state="readonly",
-            style="Dark.TCombobox", width=24, font=self.fonts.body,
-        )
-        self.reason_correction_box.pack(side="left", padx=(6, 13))
-        self.reason_correction_box.bind("<<ComboboxSelected>>", self._toggle_new_label_row)
-        self.reason_correction_box.configure(values=[CORRECT, NEW_REASON])
-        self.reason_correction_var.set(CORRECT)
+        bar.addWidget(_dim_label("Correct concern:", self.fonts))
+        self.correction_box = QComboBox(wrap)
+        self.correction_box.setFont(self.fonts.body)
+        self.correction_box.setMinimumWidth(180)
+        self.correction_box.currentTextChanged.connect(self._toggle_new_label_row)
+        bar.addWidget(self.correction_box)
 
-        ttk.Label(bar, text="Note:", style="Dim.TLabel").pack(side="left")
-        self.note_var = tk.StringVar()
-        ttk.Entry(
-            bar, textvariable=self.note_var, style="Dark.TEntry",
-            font=self.fonts.body, width=28,
-        ).pack(side="left", padx=(6, 13))
+        bar.addWidget(_dim_label("Reason:", self.fonts))
+        self.reason_correction_box = QComboBox(wrap)
+        self.reason_correction_box.setFont(self.fonts.body)
+        self.reason_correction_box.setMinimumWidth(190)
+        self.reason_correction_box.addItems([CORRECT, NEW_REASON])
+        self.reason_correction_box.currentTextChanged.connect(self._toggle_new_label_row)
+        bar.addWidget(self.reason_correction_box)
 
-        self.save_btn = ttk.Button(
-            bar, text="Save to dataset", style="Ghost.TButton",
-            command=self._save_record, state="disabled",
-        )
-        self.save_btn.pack(side="left")
+        bar.addWidget(_dim_label("Note:", self.fonts))
+        self.note_edit = QLineEdit(wrap)
+        self.note_edit.setFont(self.fonts.body)
+        self.note_edit.setMinimumWidth(220)
+        bar.addWidget(self.note_edit)
 
-        self.save_status = ttk.Label(bar, text="", style="Dim.TLabel")
-        self.save_status.pack(side="left", padx=(11, 0))
+        self.save_btn = QPushButton("Save to dataset", wrap)
+        th.set_class(self.save_btn, "ghost")
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self._save_record)
+        bar.addWidget(self.save_btn)
+
+        self.save_status = _dim_label("", self.fonts)
+        bar.addWidget(self.save_status)
+        bar.addStretch(1)
 
         # ---- second row: naming something the taxonomy does not have -------
         # Hidden until a "+ new ..." entry is picked, because it is the rare
         # case and the bar is already wide.
-        self.new_row = ttk.Frame(wrap, style="TFrame")
+        self.new_row = QFrame(wrap)
+        new_row_layout = QHBoxLayout(self.new_row)
+        new_row_layout.setContentsMargins(0, 6, 0, 0)
+        wrap_layout.addWidget(self.new_row)
+        self.new_row.setVisible(False)
 
-        ttk.Label(self.new_row, text="NEW", style="Dim.TLabel").pack(
-            side="left", padx=(0, 11)
-        )
+        new_row_layout.addWidget(_dim_label("NEW", self.fonts))
 
-        self.new_concern_lbl = ttk.Label(self.new_row, text="Concern:", style="Dim.TLabel")
-        self.new_concern_lbl.pack(side="left")
-        self.new_concern_var = tk.StringVar()
-        self.new_concern_entry = ttk.Entry(
-            self.new_row, textvariable=self.new_concern_var, style="Dark.TEntry",
-            font=self.fonts.body, width=24,
-        )
-        self.new_concern_entry.pack(side="left", padx=(6, 6))
+        self.new_concern_lbl = _dim_label("Concern:", self.fonts)
+        new_row_layout.addWidget(self.new_concern_lbl)
+        self.new_concern_edit = QLineEdit(self.new_row)
+        self.new_concern_edit.setFont(self.fonts.body)
+        self.new_concern_edit.setMinimumWidth(180)
+        self.new_concern_edit.textChanged.connect(self._refresh_id_preview)
+        new_row_layout.addWidget(self.new_concern_edit)
 
-        self.new_reason_lbl = ttk.Label(self.new_row, text="Reason:", style="Dim.TLabel")
-        self.new_reason_lbl.pack(side="left", padx=(11, 0))
-        self.new_reason_var = tk.StringVar()
-        self.new_reason_entry = ttk.Entry(
-            self.new_row, textvariable=self.new_reason_var, style="Dark.TEntry",
-            font=self.fonts.body, width=24,
-        )
-        self.new_reason_entry.pack(side="left", padx=(6, 13))
+        self.new_reason_lbl = _dim_label("Reason:", self.fonts)
+        new_row_layout.addWidget(self.new_reason_lbl)
+        self.new_reason_edit = QLineEdit(self.new_row)
+        self.new_reason_edit.setFont(self.fonts.body)
+        self.new_reason_edit.setMinimumWidth(180)
+        self.new_reason_edit.textChanged.connect(self._refresh_id_preview)
+        new_row_layout.addWidget(self.new_reason_edit)
 
         # Shows the ids these names become, so what to paste into
         # concerns.json is never a guess.
-        self.new_id_preview = ttk.Label(self.new_row, text="", style="Dim.TLabel")
-        self.new_id_preview.pack(side="left")
-        self.new_concern_var.trace_add("write", self._refresh_id_preview)
-        self.new_reason_var.trace_add("write", self._refresh_id_preview)
+        self.new_id_preview = _dim_label("", self.fonts)
+        new_row_layout.addWidget(self.new_id_preview)
+        new_row_layout.addStretch(1)
 
     # ------------------------------------------------------------- behaviour
 
@@ -489,12 +542,11 @@ class TriageApp:
                     self._on_engine_ready(payload)
                 elif kind == "engine_error":
                     self.engine_pill.set("ENGINE FAILED", th.DANGER)
-                    self.engine_label.configure(text=payload)
+                    self.engine_label.setText(payload)
                 elif kind == "result":
                     self._render(payload)
         except queue.Empty:
             pass
-        self.root.after(80, self._drain_queue)
 
     def _on_engine_ready(self, engine: TriageEngine) -> None:
         self.engine = engine
@@ -505,65 +557,49 @@ class TriageApp:
             self.engine_pill.set("2 LAYERS", th.WARN)
             detail = "regex + rules only - model absent, confidence capped at 70%"
         n = len(engine.concern_ids)
-        self.engine_label.configure(
-            text=f"{detail}  |  {n} concern types  |  config {engine.config.config_version}"
+        self.engine_label.setText(
+            f"{detail}  |  {n} concern types  |  config {engine.config.config_version}"
         )
-        self.correction_box.configure(
-            values=[CORRECT, *engine.concern_ids, "__other__", NEW_CONCERN]
-        )
-        self.correction_var.set(CORRECT)
-
-    def _show_placeholder(self) -> None:
-        self.body_text.delete("1.0", "end")
-        self.body_text.insert("1.0", PLACEHOLDER, "placeholder")
-        self._placeholder_showing = True
-
-    def _clear_placeholder(self, _event=None) -> None:
-        if self._placeholder_showing:
-            self.body_text.delete("1.0", "end")
-            self._placeholder_showing = False
-
-    def _current_body(self) -> str:
-        if self._placeholder_showing:
-            return ""
-        return self.body_text.get("1.0", "end-1c")
+        self.correction_box.blockSignals(True)
+        self.correction_box.clear()
+        self.correction_box.addItems([CORRECT, *engine.concern_ids, "__other__", NEW_CONCERN])
+        self.correction_box.setCurrentText(CORRECT)
+        self.correction_box.blockSignals(False)
 
     def _clear(self) -> None:
-        self.subject_var.set("")
-        self._show_placeholder()
+        self.subject_edit.clear()
+        self.body_text.clear()
         self.result = None
-        self.save_btn.configure(state="disabled")
-        self.save_status.configure(text="")
-        self.note_var.set("")
+        self.save_btn.setEnabled(False)
+        self.save_status.setText("")
+        self.note_edit.clear()
         self._reset_correction_inputs()
         self._reset_output()
 
     def _load_sample(self) -> None:
         subject, body = SAMPLES[self._sample_index % len(SAMPLES)]
         self._sample_index += 1
-        self.subject_var.set(subject)
-        self._placeholder_showing = False
-        self.body_text.delete("1.0", "end")
-        self.body_text.insert("1.0", body)
+        self.subject_edit.setText(subject)
+        self.body_text.setPlainText(body)
         self._analyze()
 
     def _analyze(self) -> None:
         if self.engine is None:
-            self.save_status.configure(text="engine still loading...")
+            self.save_status.setText("engine still loading...")
             return
-        body = self._current_body().strip()
+        body = self.body_text.toPlainText().strip()
         if not body:
-            self.save_status.configure(text="nothing to analyze")
+            self.save_status.setText("nothing to analyze")
             return
-        self.analyze_btn.configure(state="disabled", text="Analyzing...")
+        self.analyze_btn.setEnabled(False)
+        self.analyze_btn.setText("Analyzing...")
         subject, clean_body = separate_transport_headers(
             body,
-            self.subject_var.get(),
+            self.subject_edit.text(),
         )
         if clean_body != body:
-            self.subject_var.set(subject)
-            self.body_text.delete("1.0", "end")
-            self.body_text.insert("1.0", clean_body)
+            self.subject_edit.setText(subject)
+            self.body_text.setPlainText(clean_body)
             body = clean_body
 
         def work() -> None:
@@ -578,68 +614,63 @@ class TriageApp:
     # ---------------------------------------------------------------- render
 
     def _reset_output(self) -> None:
-        self.concern_label.configure(text="-")
-        self.concern_id_label.configure(text="")
-        self.conf_label.configure(text="")
-        self.reason_label.configure(text="")
-        self.reason_heading.pack_forget()
-        self.reason_label.pack_forget()
-        self.warn_label.configure(text="")
+        self.concern_label.setText("-")
+        self.concern_id_label.setText("")
+        self.conf_label.setText("")
+        self.reason_label.setText("")
+        self.reason_heading.setVisible(False)
+        self.reason_label.setVisible(False)
+        self.warn_label.setText("")
         self.status_pill.set("READY", th.NEUTRAL)
         self.meter.set(0.0, th.NEUTRAL)
-        self.tree.delete(*self.tree.get_children())
+        self.tree.clear()
         for widget in (self.plain_out, self.json_out, self.why_out):
-            widget.configure(state="normal")
-            widget.delete("1.0", "end")
-            widget.configure(state="disabled")
+            widget.setPlainText("")
 
     def _render(self, result: TriageResult) -> None:
         self.result = result
-        self.analyze_btn.configure(state="normal", text="Analyze")
-        self.save_btn.configure(state="normal")
-        self.save_status.configure(text="")
+        self.analyze_btn.setEnabled(True)
+        self.analyze_btn.setText("Analyze")
+        self.save_btn.setEnabled(True)
+        self.save_status.setText("")
 
         color = th.STATUS_COLORS.get(result.status.value, th.NEUTRAL)
         self.status_pill.set(result.status.value, color)
-        self.concern_label.configure(text=result.display_name or "No concern identified")
-        self.concern_id_label.configure(
-            text=(result.concern_id or "-")
+        self.concern_label.setText(result.display_name or "No concern identified")
+        self.concern_id_label.setText(
+            (result.concern_id or "-")
             + ("   |   review required" if result.needs_review else "")
         )
 
         accept = self.engine.config.thresholds["accept"] if self.engine else 0.55
         review = self.engine.config.thresholds["review"] if self.engine else 0.35
         self.meter.set(result.confidence, color, ticks=(review, accept))
-        self.conf_label.configure(text=f"{result.confidence:.0%}")
+        self.conf_label.setText(f"{result.confidence:.0%}")
 
         if result.reason_id:
-            if not self.reason_heading.winfo_manager():
-                self.reason_heading.pack(
-                    anchor="w", pady=(11, 0), after=self.concern_id_label
-                )
-                self.reason_label.pack(
-                    anchor="w", pady=(2, 0), after=self.reason_heading
-                )
-            self.reason_label.configure(text=result.reason_display_name)
+            self.reason_heading.setVisible(True)
+            self.reason_label.setVisible(True)
+            self.reason_label.setText(result.reason_display_name)
         else:
-            self.reason_heading.pack_forget()
-            self.reason_label.pack_forget()
+            self.reason_heading.setVisible(False)
+            self.reason_label.setVisible(False)
 
-        self.decision_label.configure(
-            text=f"decided by: {result.explanation.reason}   |   "
-                 f"margin {result.margin:+.3f}   |   "
-                 f"layers: {', '.join(result.explanation.layers_used)}   |   "
-                 f"{result.elapsed_ms:.0f} ms"
+        self.decision_label.setText(
+            f"decided by: {result.explanation.reason}   |   "
+            f"margin {result.margin:+.3f}   |   "
+            f"layers: {', '.join(result.explanation.layers_used)}   |   "
+            f"{result.elapsed_ms:.0f} ms"
         )
         self._refresh_reason_options(result.concern_id)
 
-        self.tree.delete(*self.tree.get_children())
+        self.tree.clear()
         for values, tag in _field_tree_rows(result):
-            self.tree.insert(
-                "", "end",
-                values=values,
-                tags=(tag,),
-            )
+            item = QTreeWidgetItem(list(values))
+            item.setTextAlignment(2, Qt.AlignCenter)
+            color = QColor(self.TAG_COLORS.get(tag, th.TEXT))
+            for column in range(4):
+                item.setForeground(column, color)
+            self.tree.addTopLevelItem(item)
 
         warns: list[str] = []
         if result.missing_fields:
@@ -654,17 +685,16 @@ class TriageApp:
             )
         if not self.engine or not self.engine.embeddings_active:
             warns.append("Embedding layer inactive: confidence is capped at 70%.")
-        self.warn_label.configure(text="\n".join(warns))
+        self.warn_label.setText("\n".join(warns))
 
-        self._fill(self.plain_out, to_plain_text(result))
-        self._fill(self.json_out, to_json(result))
-        self._fill(
-            self.why_out,
+        self.plain_out.setPlainText(to_plain_text(result))
+        self.json_out.setPlainText(to_json(result))
+        self.why_out.setPlainText(
             to_explanation_text(
                 result,
                 thresholds=self.engine.config.thresholds if self.engine else None,
                 embeddings_active=bool(self.engine and self.engine.embeddings_active),
-            ),
+            )
         )
         self._reset_correction_inputs()
 
@@ -675,129 +705,126 @@ class TriageApp:
             concern = self.engine.config.concern(concern_id)
             if concern:
                 options += [r.id for r in concern.reasons]
-        self.reason_correction_box.configure(values=[*options, NEW_REASON])
+        self.reason_correction_box.blockSignals(True)
+        current = self.reason_correction_box.currentText()
+        self.reason_correction_box.clear()
+        self.reason_correction_box.addItems([*options, NEW_REASON])
+        self.reason_correction_box.setCurrentText(
+            current if current in [*options, NEW_REASON] else CORRECT
+        )
+        self.reason_correction_box.blockSignals(False)
 
     # -------------------------------------------------- new-taxonomy capture
 
-    def _toggle_new_label_row(self, _event=None) -> None:
+    def _toggle_new_label_row(self, _text: str = "") -> None:
         """Show the NEW row only while a '+ new ...' entry is selected."""
-        want_concern = self.correction_var.get() == NEW_CONCERN
-        want_reason = self.reason_correction_var.get() == NEW_REASON
+        want_concern = self.correction_box.currentText() == NEW_CONCERN
+        want_reason = self.reason_correction_box.currentText() == NEW_REASON
 
-        if want_concern or want_reason:
-            if not self.new_row.winfo_ismapped():
-                self.new_row.pack(fill="x", pady=(6, 0))
-        else:
-            self.new_row.pack_forget()
+        self.new_row.setVisible(want_concern or want_reason)
 
         for widget, wanted in (
-            (self.new_concern_entry, want_concern),
-            (self.new_reason_entry, want_reason),
+            (self.new_concern_edit, want_concern),
+            (self.new_reason_edit, want_reason),
         ):
-            widget.configure(state="normal" if wanted else "disabled")
+            widget.setEnabled(wanted)
         for label, wanted in (
             (self.new_concern_lbl, want_concern),
             (self.new_reason_lbl, want_reason),
         ):
-            label.configure(style="Dim.TLabel" if wanted else "Faint.TLabel")
+            th.set_class(label, "dim" if wanted else "faint")
+            _restyle(label)
 
         if want_concern:
-            self.new_concern_entry.focus_set()
+            self.new_concern_edit.setFocus()
         elif want_reason:
-            self.new_reason_entry.focus_set()
+            self.new_reason_edit.setFocus()
         self._refresh_id_preview()
 
     def _refresh_id_preview(self, *_args) -> None:
         parts = []
-        if self.correction_var.get() == NEW_CONCERN:
-            slug = slugify_label(self.new_concern_var.get())
+        if self.correction_box.currentText() == NEW_CONCERN:
+            slug = slugify_label(self.new_concern_edit.text())
             parts.append(f"concern id: {slug or '-'}")
-        if self.reason_correction_var.get() == NEW_REASON:
-            slug = slugify_label(self.new_reason_var.get())
+        if self.reason_correction_box.currentText() == NEW_REASON:
+            slug = slugify_label(self.new_reason_edit.text())
             parts.append(f"reason id: {slug or '-'}")
-        self.new_id_preview.configure(
-            text=("   ".join(parts) + "   (add to concerns.json to make it predictable)")
+        self.new_id_preview.setText(
+            ("   ".join(parts) + "   (add to concerns.json to make it predictable)")
             if parts
             else ""
         )
 
     def _reset_correction_inputs(self) -> None:
-        self.correction_var.set(CORRECT)
-        self.reason_correction_var.set(CORRECT)
-        self.new_concern_var.set("")
-        self.new_reason_var.set("")
+        if self.correction_box.count():
+            self.correction_box.setCurrentText(CORRECT)
+        self.reason_correction_box.setCurrentText(CORRECT)
+        self.new_concern_edit.setText("")
+        self.new_reason_edit.setText("")
         self._toggle_new_label_row()
-
-    def _fill(self, widget: tk.Text, content: str) -> None:
-        widget.configure(state="normal")
-        widget.delete("1.0", "end")
-        widget.insert("1.0", content)
-        widget.configure(state="disabled")
 
     # ----------------------------------------------------------------- teach
 
     def _copy_json(self) -> None:
         if self.result is None:
             return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(to_json(self.result))
-        self.save_status.configure(text="JSON copied to clipboard")
+        QApplication.clipboard().setText(to_json(self.result))
+        self.save_status.setText("JSON copied to clipboard")
 
     def _copy_why(self) -> None:
         if self.result is None:
             return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(
+        QApplication.clipboard().setText(
             to_explanation_text(
                 self.result,
                 thresholds=self.engine.config.thresholds if self.engine else None,
                 embeddings_active=bool(self.engine and self.engine.embeddings_active),
             )
         )
-        self.save_status.configure(text="explanation copied to clipboard")
+        self.save_status.setText("explanation copied to clipboard")
 
     def _save_record(self) -> None:
         if self.result is None:
             return
 
-        choice = self.correction_var.get()
+        choice = self.correction_box.currentText()
         corrected = None
         proposed_concern = ""
         if choice == NEW_CONCERN:
-            proposed_concern = self.new_concern_var.get().strip()
+            proposed_concern = self.new_concern_edit.text().strip()
             if not proposed_concern:
-                self.save_status.configure(text="name the new concern first")
-                self.new_concern_entry.focus_set()
+                self.save_status.setText("name the new concern first")
+                self.new_concern_edit.setFocus()
                 return
         elif not choice.startswith("("):
             corrected = choice
 
-        rchoice = self.reason_correction_var.get()
+        rchoice = self.reason_correction_box.currentText()
         corrected_reason = None
         proposed_reason = ""
         if rchoice == NEW_REASON:
-            proposed_reason = self.new_reason_var.get().strip()
+            proposed_reason = self.new_reason_edit.text().strip()
             if not proposed_reason:
-                self.save_status.configure(text="name the new reason first")
-                self.new_reason_entry.focus_set()
+                self.save_status.setText("name the new reason first")
+                self.new_reason_edit.setFocus()
                 return
         elif not rchoice.startswith("("):
             corrected_reason = rchoice
 
         record = build_training_record(
-            body=self._current_body(),
-            subject=self.subject_var.get(),
+            body=self.body_text.toPlainText(),
+            subject=self.subject_edit.text(),
             result=self.result,
             corrected_concern_id=corrected,
             corrected_reason_id=corrected_reason,
             proposed_concern=proposed_concern,
             proposed_reason=proposed_reason,
-            reviewer_note=self.note_var.get().strip(),
+            reviewer_note=self.note_edit.text().strip(),
         )
         try:
             path = append_training_record(record, DATASET_PATH)
         except OSError as exc:
-            messagebox.showerror("Could not save", f"{type(exc).__name__}: {exc}")
+            show_error_dialog(self, "Could not save", f"{type(exc).__name__}: {exc}")
             return
 
         label = record["label"]
@@ -809,22 +836,17 @@ class TriageApp:
         else:
             verified = "verified" if label["verified_by_human"] else "unverified"
             status = f"saved {verified} row -> {path.parent.name}/{path.name}"
-        self.save_status.configure(text=status)
-        self.note_var.set("")
+        self.save_status.setText(status)
+        self.note_edit.setText("")
         self._reset_correction_inputs()
 
 
 def main() -> None:
     """Open the window. Flag handling lives in __main__, which routes here."""
-    root = tk.Tk()
-    try:
-        # Left at 1.0 deliberately. Text size is set by the point sizes in
-        # theme.Fonts; scaling here would also inflate every padding value.
-        root.tk.call("tk", "scaling", 1.0)
-    except tk.TclError:
-        pass
-    TriageApp(root)
-    root.mainloop()
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = TriageApp()
+    window.show()
+    app.exec()
 
 
 if __name__ == "__main__":
