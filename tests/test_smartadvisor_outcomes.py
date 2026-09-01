@@ -53,11 +53,12 @@ def test_reply_templates_cover_no_match_denied_and_paid():
     )
 
     assert "Concern: No Bill on File" in no_match
-    assert "Concern: Completed Processing - Denied" in denied
-    assert "Denial code: CO-16" in denied
-    assert "Concern: Completed Processing - Paid" in paid
-    assert "Paid date: 08/20/2026" in paid
-    assert "Check number: CHK-77421" in paid
+    assert "has been completed processing and denied" in denied
+    assert "Denial Reason : Bill has been denied with CO-16." in denied
+    assert "has been completed processing and paid" in paid
+    assert "Paid Amount : $527.00" in paid
+    assert "Paid Date : 08/20/2026" in paid
+    assert "Check/Transaction # : CHK-77421" in paid
 
 
 class _NoMatchDriver:
@@ -154,6 +155,9 @@ class _StatusWorkflow(NoBillOnFileWorkflow):
     def _read_header_paid_date(self):
         return "08/20/2026"
 
+    def _read_header_received_date(self):
+        return "08/15/2026"
+
     def _read_lines_denied_codes(self):
         return self.denied_codes
 
@@ -200,14 +204,16 @@ def test_zero_paid_amount_uses_history_then_lines_denial_flow():
     assert result.eor_pdf_path == r"C:\EOR's\BILL-77.pdf"
 
 
-def test_zero_paid_amount_without_denial_codes_does_not_save_eor():
+def test_zero_paid_amount_without_denial_codes_is_pending():
     workflow = _StatusWorkflow("0.00", denied_codes=("", ""))
 
     result = _resolve_status(workflow)
 
-    assert result.disposition == "denied"
+    assert result.disposition == "pending"
     assert result.denial_code is None
+    assert result.received_date == "08/15/2026"
     assert result.eor_pdf_path is None
+    assert workflow.tabs == ["History", "Lines", "Header"]
     assert workflow.eor_calls == []
 
 
@@ -237,3 +243,68 @@ def test_eor_path_uses_client_and_bill_with_safe_filename(monkeypatch, tmp_path)
 
     assert bill_document_name({"Client": "A:C", "Bill no": "B/7"}) == "A:C-B/7"
     assert path == tmp_path / "SmartAdvisorAutomation" / "EOR's" / "A-C-B-7.pdf"
+
+
+class _DirectBillDriver:
+    def invalidate_scopes(self):
+        pass
+
+
+class _DirectBillWorkflow(NoBillOnFileWorkflow):
+    def __init__(self, paid_amount, denied_codes=("", "")):
+        super().__init__(_DirectBillDriver())
+        self.paid_amount = paid_amount
+        self.denied_codes = denied_codes
+        self.opened_reference = None
+
+    def _open_bill_by_reference(self, client, bill_no):
+        self.opened_reference = (client, bill_no)
+        return {"Client": client, "Bill No": bill_no}
+
+    def _select_bill_tab(self, step, label, fragment):
+        pass
+
+    def _wait_for_history_paid_amount(self):
+        return self.paid_amount
+
+    def _read_history_check_transaction(self):
+        return "CHK-1"
+
+    def _read_header_paid_date(self):
+        return "08/20/2026"
+
+    def _read_header_received_date(self):
+        return "08/15/2026"
+
+    def _read_lines_denied_codes(self):
+        return self.denied_codes
+
+    def _open_print_eor_window(self):
+        pass
+
+    def _prepare_print_eor_selection(self, row_details):
+        pass
+
+    def _save_export_report_pdf(self, row_details):
+        return r"C:\EOR's\AMNY-714.pdf"
+
+
+def test_run_dispatches_direct_bill_reference_without_search():
+    workflow = _DirectBillWorkflow("0.00")
+
+    result = workflow.run("AMNY-714", "", "")
+
+    assert workflow.opened_reference == ("AMNY", "714")
+    assert result.disposition == "pending"
+    assert result.received_date == "08/15/2026"
+
+
+def test_run_direct_bill_reference_paid_uses_expected_amount_field():
+    workflow = _DirectBillWorkflow("527.00")
+
+    result = workflow.run("AMNY714", "", "527.00", patient_account="PA-1")
+
+    assert workflow.opened_reference == ("AMNY", "714")
+    assert result.disposition == "paid"
+    assert result.amount == "527.00"
+    assert result.patient_account == "PA-1"

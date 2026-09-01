@@ -8,6 +8,8 @@ OPEN_BILL_WINDOW_AUTOMATION_ID = "frmBillOpen"
 OPEN_BILL_FRAME_AUTOMATION_ID = "Frame1"
 OPEN_BILL_FRAME_NAME = "Enter Bill To Edit"
 OPEN_BILL_ACTION_AUTOMATION_ID = "_cmdSearch_1"
+OPEN_BILL_CLIENT_AUTOMATION_ID = "cboClient"
+OPEN_BILL_BILL_NUMBER_AUTOMATION_ID = "_txtData_1"
 BILL_SEARCH_WINDOW_TITLE = "Bill Search"
 BILL_SEARCH_WINDOW_AUTOMATION_ID = "frmBillSearch"
 BILL_SEARCH_FRAME_AUTOMATION_ID = "Frame1"
@@ -82,6 +84,7 @@ BILL_TAB_SETTLE_TIMEOUT = 3.0
 HISTORY_PAID_AMOUNT_AUTOMATION_ID = "_txtData_91"
 HISTORY_CHECK_TRANSACTION_AUTOMATION_ID = "_txtData_83"
 HEADER_PAID_DATE_AUTOMATION_ID = "_txtData_5"
+HEADER_RECEIVED_DATE_AUTOMATION_ID = "_txtData_3"
 BILL_LINES_GRID_AUTOMATION_ID = "Spread1"
 
 # Non-client title bar button: it publishes no AutomationId, so it is found by
@@ -239,6 +242,27 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         action="click",
     ),
     ControlSpec(
+        step="7.20",
+        automation_id=OPEN_BILL_CLIENT_AUTOMATION_ID,
+        label="Open Bill client",
+        action="input",
+        scope_automation_id=OPEN_BILL_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.21",
+        automation_id=OPEN_BILL_BILL_NUMBER_AUTOMATION_ID,
+        label="Open Bill number",
+        action="input",
+        scope_automation_id=OPEN_BILL_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.22",
+        automation_id=OPEN_BILL_OK_AUTOMATION_ID,
+        label="Open Bill OK",
+        action="click",
+        scope_automation_id=OPEN_BILL_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
         step="7.3",
         automation_id=BILL_PENDED_WARNING_OK_AUTOMATION_ID,
         label="Pended bill warning",
@@ -271,6 +295,13 @@ NO_BILL_ON_FILE_CONTROLS: tuple[ControlSpec, ...] = (
         step="7.12",
         automation_id=HEADER_PAID_DATE_AUTOMATION_ID,
         label="Header paid date",
+        action="extract",
+        scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
+    ),
+    ControlSpec(
+        step="7.13",
+        automation_id=HEADER_RECEIVED_DATE_AUTOMATION_ID,
+        label="Header received date",
         action="extract",
         scope_automation_id=BILL_ENTRY_WINDOW_AUTOMATION_ID,
     ),

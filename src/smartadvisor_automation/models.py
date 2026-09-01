@@ -15,7 +15,7 @@ Action = Literal[
     "keys",
     "select_tab",
 ]
-Disposition = Literal["no_match", "denied", "paid", "no_claim_on_file"]
+Disposition = Literal["no_match", "denied", "paid", "pending", "no_claim_on_file"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +86,7 @@ class WorkflowResult:
     paid_date: str | None = None
     check_number: str | None = None
     denial_code: str | None = None
+    received_date: str | None = None
     eor_pdf_path: str | None = None
 
     def to_dict(self) -> dict[str, object]:

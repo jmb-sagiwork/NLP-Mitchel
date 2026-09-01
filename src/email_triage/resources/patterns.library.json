@@ -42,8 +42,8 @@
       ]
     },
     "claim_id": {
-      "description": "Carrier claim id. Supports letter prefixes, numeric IDs, optional -N suffixes, and 7-digit carrier IDs containing a letter marker before their check digit (4184847CMT1).",
-      "regex": "\\b([A-Z]{1,4}[-\\s]?\\d{6,14}(?:-\\d{1,3})?|\\d{7}[A-Z]{1,8}\\d{1,3}|\\d{7,14}(?:-\\d{1,3})?)\\b",
+      "description": "Carrier claim id. Supports letter prefixes, numeric IDs, optional -N suffixes, 7-digit carrier IDs containing a letter marker before their check digit (4184847CMT1), and compact direct bill references (4 letters + 1-5 digits, e.g. AMNY-714).",
+      "regex": "\\b([A-Z]{1,4}[-\\s]?\\d{6,14}(?:-\\d{1,3})?|\\d{7}[A-Z]{1,8}\\d{1,3}|\\d{7,14}(?:-\\d{1,3})?|[A-Z]{4}[-\\s]?\\d{1,5})\\b",
       "flags": [
         "IGNORECASE"
       ],
@@ -52,7 +52,9 @@
         "WC1234567",
         "ABC-00456789",
         "100234567",
-        "4184847CMT1"
+        "4184847CMT1",
+        "AMNY-714",
+        "AMNY714"
       ]
     },
     "patient_account": {

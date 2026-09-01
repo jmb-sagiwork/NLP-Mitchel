@@ -107,14 +107,85 @@ SEARCH_RESULT_DETAIL_KEYS = {
 DENIAL_CODE_REASONS = {
     "C56": "PAID WITHOUT PREJUDICE",
     "932": "NOT AUTHORIZED PER UR - [ CA ]",
-    "D10": "NON-ESTABLISHED BODY SITE",
-    "D35": "TIME LIMIT FOR FILING EXPIRED",
-    "XAW": "SERVICE PENDING FURTHER REVIEW",
-    "XDC": "NON-COMPENSABLE CLAIM",
-    "CND": "CONTROVERTED CLAIM DENIED",
     "G21": "OUTPATIENT REIMBURSEMENT",
+    "D02": "The claim/service has been transferred to the proper payer/processor for "
+    "processing; claim/service not covered by this payer/processor.",
+    "XAW": "The disposition of this claim/service is pending further review.",
+    "XDC": "Worker compensation claim adjudicated as non-compensable; this payer is not "
+    "liable for the claim or service/treatment.",
+    "224": "A charge was made for a duplicate procedure and/or supply.",
+    "D03": "Claim has been controverted by a FROI or SROI-04.",
+    "XCS": "Precertification/Authorization/Notification absent.",
+    "D08": "Prior authorization was not granted for the medical treatment guideline "
+    "procedure/treatment requiring pre-authorization.",
+    "608": "The APR-DRG and the severity of illness factor are both required in order "
+    "to determine the APR-DRG allowance.",
+    "XCY": "Workers compensation case settled. Patient responsible for amount of this "
+    "claim per WC Medicare set-aside arrangement or other agreement.",
+    "XDL": "Workers compensation claim is under investigation.",
+    "220": "The provider billed for a visit on the same day of surgery or within the "
+    "follow-up of a previously performed surgery.",
+    "936": "This code is either deleted, non-covered, bundled, invalid, or the status "
+    "indicator is not allowable under the provider's jurisdiction.",
+    "225": "The submitted documentation does not support the service being billed for; "
+    "we will re-evaluate this upon receipt of clarifying information.",
+    "D22": "Diagnostic test was performed outside of network. Supporting documents are "
+    "required to proceed with the review.",
+    "972": "This is not related to the injury and is denied.",
+    "PPD": "The network has identified this bill as a duplicate; please contact the "
+    "network.",
+    "QC9": "Based on documentation submitted it is recommended that service should. "
+    "However, supporting documents are required to proceed with the review.",
+    "217": "The value of this procedure is included in the value of another procedure "
+    "performed on this date.",
+    "Q88": "Radiology services require a copy of images not provided. Submit copy of "
+    "image or statement that equipment cannot store or export images.",
+    "D10": "Treatment provided was for a non-established body site or for a body site "
+    "that the employer/insurer has not accepted liability for.",
+    "D24": "Treatment provided was not based on correct application of the guidelines.",
+    "D26": "Treatment deviates from the guidelines without securing a variance.",
+    "CND": "Workers compensation claim adjudicated as non-compensable. This payer not "
+    "liable for claim or service/treatment.",
+    "P86": "Allowance has been priced in accordance with your Multiplan contract; "
+    "questions call 800-937-6824.",
+    "P24": "Payment adjusted based on preferred provider organization (PPO).",
+    "XBW": "This diagnosis is not covered.",
+    "201": "A charge was made for two visits on the same day.",
+    "D15": "Medical report not timely filed.",
+    "X26": "Expenses incurred prior to coverage.",
+    "F15": "No allowance has been recommended as this code has not been adopted for use "
+    "in the fee schedule.",
+    "D05": "Claim has been controverted. The case has been denied.",
+    "X38": "Services not provided or authorized by designated (network/primary care) "
+    "providers.",
+    "790": "This bill was reviewed using the official medical fee schedule of Alabama.",
+    "722": "The service/chargemaster code is either invalid or not provided; please "
+    "resubmit the correct or missing information.",
+    "253": "In order to review this charge, please submit a copy of the invoice.",
+    "PDN": "Payment recommendation is per payor request or state reimbursement rules.",
+    "P04": "Reviewed to standard of reasonableness based on comparisons to industry "
+    "benchmarks of charges and reimbursement for services in the area.",
+    "PHO": "Surgical implant charges reviewed separately by Foresight Medical; please "
+    "direct inquiries for surgical implant charges to 855-481-1205.",
+    "D35": "The time limit for filing has expired.",
+    "435": "The value of this procedure is included in the value of the comprehensive "
+    "procedure.",
+    "H57": "The total component has been reimbursed; therefore the professional and "
+    "technical components are denied.",
+    "P57": "Allowance has been priced in accordance with your Coventry-owned contract; "
+    "questions call 800-937-6824.",
+    "X51": "These are non-covered services because this is a pre-existing condition.",
+    "X50": "These are non-covered services because this is not deemed a medical "
+    "necessity by the payer.",
+    "H06": "The allowance for this code is included in the pricing of other services "
+    "on the bill.",
+    "D52": "Provider not authorized to function as a pharmacy or render pharmacy "
+    "services; please refer to a licensed pharmacy.",
 }
-BR_MSG_CODE_REASONS = {"U02": "UR RECEIVED AND DENIED"}
+BR_MSG_CODE_REASONS = {
+    "U02": "The billed service was reviewed by UR and denied.",
+    "U05": "The billed service exceeds the UR amount authorized.",
+}
 
 ProgressCallback = Callable[[str, str], None]
 LogCallback = Callable[[str], None]
@@ -227,6 +298,16 @@ def validate_optional_claim_id(value: str) -> str:
     if not normalized:
         return ""
     return validate_claim_id(normalized)
+
+
+def parse_direct_bill_reference(value: str) -> tuple[str, str] | None:
+    """Parse compact direct bill input like AMNY714 or AMNY-714."""
+
+    normalized = str(value or "").strip()
+    match = re.fullmatch(r"([A-Za-z]{4})[\s_-]*(\d{1,12})", normalized)
+    if match is None:
+        return None
+    return match.group(1).upper(), match.group(2)
 
 
 def normalize_dos(value: str) -> str:
@@ -515,6 +596,18 @@ def extract_denial_code(controls: list[tuple[str, str]]) -> str | None:
     return None
 
 
+def _denial_reason_text(denial_code: str | None) -> str:
+    if not denial_code:
+        return ""
+    codes = [code.strip() for code in denial_code.split(",") if code.strip()]
+    reasons: list[str] = []
+    for code in codes:
+        reason = DENIAL_CODE_REASONS.get(code) or BR_MSG_CODE_REASONS.get(code) or code
+        if reason not in reasons:
+            reasons.append(reason)
+    return ", ".join(reasons)
+
+
 def build_reply_template(
     disposition: str,
     *,
@@ -527,6 +620,8 @@ def build_reply_template(
     paid_date: str | None = None,
     check_number: str | None = None,
     denial_code: str | None = None,
+    received_date: str | None = None,
+    bill_name: str = "",
 ) -> str:
     header = "To: Requestor\nSubject: Bill Status Response\n\n"
     if disposition == "no_claim_on_file":
@@ -554,21 +649,44 @@ def build_reply_template(
             + f"DOS {dos_from}, and billed amount {expected_amount}.\n"
             + "Please resubmit the bill with the supporting medical reports."
         )
+    name = bill_name or claim_id
     if disposition == "denied":
-        return (
-            header + "Concern: Completed Processing - Denied\n\n"
-            + f"The bill for claim {claim_id} and DOS {dos_from} was processed "
-            + "and denied.\n"
-            + f"Denial code: {denial_code or 'Unavailable'}"
+        reason = _denial_reason_text(denial_code)
+        denial_line = (
+            f"Denial Reason : Bill has been denied with {reason}."
+            if reason
+            else "Denial Reason : Bill has been denied."
         )
-    return (
-        header + "Concern: Completed Processing - Paid\n\n"
-        + f"The bill for claim {claim_id} and DOS {dos_from} was processed "
-        + "and paid.\n"
-        + f"Paid amount: {paid_amount or 'Unavailable'}\n"
-        + f"Paid date: {paid_date or 'Unavailable'}\n"
-        + f"Check number: {check_number or 'Unavailable'}"
-    )
+        return (
+            "Hello,\n"
+            f"This bill {name} has been completed processing and denied "
+            "please see the attached EOR's for processing details .\n"
+            f"{denial_line}"
+        )
+    if disposition == "pending":
+        return (
+            f"This bill {name} was received on "
+            f"{received_date or 'Unavailable'} and is currently pending "
+            "with the carrier . Please reach the carrier at 833-520-8786 "
+            "for additional information"
+        )
+    lines = [
+        "Hello,",
+        (
+            f"This bill {name} has been completed processing and "
+            "paid. Please see the attached EOR's for processing details ."
+        ),
+    ]
+    if paid_amount:
+        amount_text = (
+            paid_amount if paid_amount.startswith("$") else f"${paid_amount}"
+        )
+        lines.append(f"Paid Amount : {amount_text}")
+    if check_number:
+        lines.append(f"Check/Transaction # : {check_number}")
+    if paid_date:
+        lines.append(f"Paid Date : {paid_date}")
+    return "\n".join(lines)
 
 
 class NoBillOnFileWorkflow:
@@ -916,6 +1034,100 @@ class NoBillOnFileWorkflow:
             self.progress("7.3", "Acknowledging the pended bill warning")
             self.driver.click(warning)
 
+    def _enter_open_bill_client(self, client: str) -> None:
+        client = client.strip().upper()
+        client_spec = CONTROLS_BY_STEP["7.20"]
+        self.driver.click(client_spec)
+        self.driver.send_focused_keys("^a{BACKSPACE}", step="7.20")
+        self.driver.paste_focused_text(client, step="7.20")
+        self.driver.send_focused_keys("{ENTER}", step="7.20")
+        time.sleep(0.6)
+
+        selected_client = self.driver.read_text(client_spec, timeout=8.0)
+        selected_normalized = selected_client.strip().upper()
+        valid_prefixes = (client, f"{client} ", f"{client}-", f"{client} -")
+        if not any(
+            selected_normalized.startswith(prefix) for prefix in valid_prefixes
+        ):
+            self.log(
+                "Open Bill client verification failed after paste; "
+                f"selected={selected_client!r}"
+            )
+            self.driver.input_text(client_spec, client)
+            self.driver.send_focused_keys("{ENTER}", step="7.20")
+            time.sleep(0.6)
+            selected_client = self.driver.read_text(client_spec, timeout=8.0)
+            selected_normalized = selected_client.strip().upper()
+            if not any(
+                selected_normalized.startswith(prefix) for prefix in valid_prefixes
+            ):
+                raise AutomationError(
+                    "direct_bill_client_not_selected",
+                    step="7.20",
+                    diagnostics={
+                        "client": client,
+                        "selected_client": selected_client,
+                    },
+                )
+        self.log(f"Open Bill client selected: {selected_client}")
+
+    def _wait_for_bill_entry_after_open(
+        self,
+        *,
+        timeout: float,
+        error_code: str,
+        step: str,
+    ) -> None:
+        initial_timeout = min(timeout, 3.0)
+        if self.driver.is_present(CONTROLS_BY_STEP["7.4"], timeout=initial_timeout):
+            return
+
+        self.log("bill entry tab not ready; checking pended warning")
+        warning = CONTROLS_BY_STEP["7.3"]
+        self._check_cancelled()
+        if self.driver.is_present(warning, timeout=1.0):
+            self.progress("7.3", "Acknowledging the pended bill warning")
+            self.driver.click(warning)
+
+        if not self.driver.is_present(CONTROLS_BY_STEP["7.4"], timeout=timeout):
+            raise AutomationError(error_code, step=step)
+
+    def _open_bill_by_reference(self, client: str, bill_no: str) -> dict[str, str]:
+        self._check_cancelled()
+        self.progress("fresh-start", "Closing old SmartAdvisor subwindows")
+        closed_windows = self.driver.close_all_subwindows_for_finish()
+        if closed_windows:
+            self.log(f"fresh-start closed {closed_windows} subwindow(s)")
+
+        self.progress("attach", "Attaching to SmartAdvisor")
+        backend = self.driver.attach(CONTROLS_BY_STEP["1"])
+        self.log(f"attached backend={backend}")
+
+        self._run_step(
+            "7.20",
+            f"Selecting Open Bill client {client}",
+            lambda: self._enter_open_bill_client(client),
+        )
+        self._run_step(
+            "7.21",
+            "Entering Open Bill number",
+            lambda: self.driver.input_child_edit_text(
+                CONTROLS_BY_STEP["7.21"], bill_no
+            ),
+        )
+        self._run_step(
+            "7.22",
+            "Opening direct bill reference",
+            lambda: self.driver.click(CONTROLS_BY_STEP["7.22"]),
+        )
+        self._wait_for_bill_entry_after_open(
+            timeout=25.0,
+            error_code="direct_bill_open_failed",
+            step="7.22",
+        )
+        self.log(f"direct bill {client}-{bill_no} opened")
+        return {"Client": client, "Bill No": bill_no}
+
     def _select_bill_tab(self, step: str, label: str, fragment: str) -> None:
         self._run_step(
             step, f"Switching to the {label} tab",
@@ -969,6 +1181,16 @@ class NoBillOnFileWorkflow:
             ).strip()
         except AutomationError as exc:
             self.log(f"header paid date unavailable ({exc.code})")
+            return ""
+
+    def _read_header_received_date(self) -> str:
+        self.progress("7.13", "Reading header received date")
+        try:
+            return self.driver.read_text(
+                CONTROLS_BY_STEP["7.13"], timeout=3.0
+            ).strip()
+        except AutomationError as exc:
+            self.log(f"header received date unavailable ({exc.code})")
             return ""
 
     def _current_lines_row_count(self) -> int:
@@ -1266,6 +1488,27 @@ class NoBillOnFileWorkflow:
         row_details: dict[str, str],
     ) -> WorkflowResult:
         self._open_selected_bill()
+        return self._classify_open_bill_status(
+            claim_id=claim_id,
+            dos_from=dos_from,
+            expected_amount=expected_amount,
+            amount=amount,
+            row_index=row_index,
+            row_details=row_details,
+            patient_account=row_details.get("Patient Account"),
+        )
+
+    def _classify_open_bill_status(
+        self,
+        *,
+        claim_id: str,
+        dos_from: str,
+        expected_amount: str,
+        amount: str,
+        row_index: int,
+        row_details: dict[str, str],
+        patient_account: str | None,
+    ) -> WorkflowResult:
         self._select_bill_tab("7.4", "History", BILL_HISTORY_TAB_NAME_FRAGMENT)
         paid_amount = self._wait_for_history_paid_amount()
         check_number = self._read_history_check_transaction()
@@ -1275,30 +1518,53 @@ class NoBillOnFileWorkflow:
             denial_code = ", ".join(
                 value for value in (denied_codes, br_msg_codes) if value
             ) or None
-            eor_pdf_path = None
             if denial_code:
                 self._open_print_eor_window()
                 self._prepare_print_eor_selection(row_details)
                 eor_pdf_path = self._save_export_report_pdf(row_details)
+                reply = build_reply_template(
+                    "denied",
+                    claim_id=claim_id,
+                    dos_from=dos_from,
+                    expected_amount=expected_amount,
+                    paid_amount=paid_amount,
+                    denial_code=denial_code,
+                    bill_name=bill_document_name(row_details),
+                )
+                return WorkflowResult(
+                    patient_account=patient_account,
+                    amount=amount,
+                    outcome="Completed Processing - Denied",
+                    row_index=row_index,
+                    rows_examined=row_index + 1,
+                    disposition="denied",
+                    reply_template=reply,
+                    paid_amount=paid_amount,
+                    denial_code=denial_code,
+                    eor_pdf_path=eor_pdf_path,
+                )
+
+            self._select_bill_tab("7.11", "Header", BILL_HEADER_TAB_NAME_FRAGMENT)
+            received_date = self._read_header_received_date()
             reply = build_reply_template(
-                "denied",
+                "pending",
                 claim_id=claim_id,
                 dos_from=dos_from,
                 expected_amount=expected_amount,
-                paid_amount=paid_amount,
-                denial_code=denial_code,
+                received_date=received_date,
+                bill_name=bill_document_name(row_details),
             )
             return WorkflowResult(
-                patient_account=row_details.get("Patient Account"),
+                patient_account=patient_account,
                 amount=amount,
-                outcome="Completed Processing - Denied",
+                outcome=(
+                    "Bill found but still in temporary - Bill Status pending"
+                ),
                 row_index=row_index,
                 rows_examined=row_index + 1,
-                disposition="denied",
+                disposition="pending",
                 reply_template=reply,
-                paid_amount=paid_amount,
-                denial_code=denial_code,
-                eor_pdf_path=eor_pdf_path,
+                received_date=received_date or None,
             )
 
         self._select_bill_tab("7.11", "Header", BILL_HEADER_TAB_NAME_FRAGMENT)
@@ -1314,9 +1580,10 @@ class NoBillOnFileWorkflow:
             paid_amount=paid_amount,
             paid_date=paid_date,
             check_number=check_number,
+            bill_name=bill_document_name(row_details),
         )
         return WorkflowResult(
-            patient_account=row_details.get("Patient Account"),
+            patient_account=patient_account,
             amount=amount,
             outcome="Completed Processing - Paid",
             row_index=row_index,
@@ -1394,6 +1661,31 @@ class NoBillOnFileWorkflow:
         leave_match_open: bool = True,
     ) -> WorkflowResult:
         claim_id = validate_optional_claim_id(claim_id)
+        direct_bill = parse_direct_bill_reference(claim_id)
+        if direct_bill is not None:
+            client, bill_no = direct_bill
+            prov_tin = prov_tin.strip()
+            patient_account = patient_account.strip()
+            self.log(f"run start direct bill reference={client}-{bill_no}")
+            self.driver.invalidate_scopes()
+            row_details = self._open_bill_by_reference(client, bill_no)
+            result = self._classify_open_bill_status(
+                claim_id=claim_id,
+                dos_from=dos_from,
+                expected_amount=expected_amount,
+                amount=expected_amount,
+                row_index=0,
+                row_details=row_details,
+                patient_account=patient_account or None,
+            )
+            self.progress("complete", result.outcome)
+            if not leave_match_open:
+                self._run_step(
+                    "7.7", "Closing the matched bill before the next job",
+                    lambda: self.driver.click(CONTROLS_BY_STEP["7.7"]),
+                )
+            return result
+
         dos_from = normalize_optional_dos(dos_from)
         expected_amount = validate_expected_amount(expected_amount)
         expected = normalize_amount(expected_amount)
