@@ -30,8 +30,18 @@ NICE_LOGGED_IN_TEXT_MARKERS = (
 MAX_EMAILS_PER_RUN = int(os.environ.get("PCC_MAX_EMAILS_PER_RUN", "25"))
 NEXT_EMAIL_ACCEPT_WAIT_SECONDS = int(os.environ.get("PCC_NEXT_EMAIL_ACCEPT_WAIT_SECONDS", "45"))
 MAX_URL = "https://max.niceincontact.com/index.html"
-NINE_DOTS_XPATH = "/html/body/app-root/div/div/cxone-header-v2/header/div[1]/div[1]/div[1]/sol-icon"
-MAX_APP_XPATH = '//*[@id="select-max"]/div/div/span'
+NINE_DOTS_XPATHS = (
+    "/html/body/app-root/div/div/cxone-header-v2/header/div[1]/div[1]/div[1]/sol-icon",
+    "//cxone-header-v2//header//sol-icon",
+    "//header//sol-icon[1]",
+    "//sol-icon[contains(@icon,'grid') or contains(@icon,'apps')"
+    " or contains(@name,'grid') or contains(@name,'apps')]",
+)
+MAX_APP_XPATHS = (
+    '//*[@id="select-max"]/div/div/span',
+    '//*[@id="select-max"]',
+    "//*[contains(@id,'select-max')]",
+)
 INTEGRATED_SOFTPHONE_XPATH = '//*[@id="sessionconnectui-0"]/div/div/div[3]/div[1]/div/label/div'
 CONNECT_BUTTON_XPATH = '//*[@id="sessionconnectui-0"]/div/div/div[3]/div[4]/button[1]/h4'
 AGENT_STATE_DROPDOWN_XPATH = '//*[@id="agentstateui-0"]/div/div[2]/div[1]/span[1]'
@@ -352,6 +362,27 @@ class IncontactExtractor:
             element,
         )
 
+    def _click_first_xpath_any_frame(
+        self, driver, xpaths: tuple[str, ...], timeout: int = 45
+    ) -> None:
+        from selenium.common.exceptions import TimeoutException
+
+        deadline = time.monotonic() + timeout
+        last_exc: Exception | None = None
+        while True:
+            for xpath in xpaths:
+                try:
+                    self._click_xpath_any_frame(driver, xpath, timeout=1)
+                    return
+                except Exception as exc:
+                    last_exc = exc
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.5)
+        raise TimeoutException(
+            f"none of the candidate xpaths were clickable: {xpaths}"
+        ) from last_exc
+
     @staticmethod
     def _element_text_or_value(driver, element) -> str:
         text = driver.execute_script(
@@ -388,9 +419,10 @@ class IncontactExtractor:
                 current_url = driver.current_url
                 title = driver.title
                 if NICE_INCONTACT_URL_MARKER in current_url:
-                    nine_dots = driver.find_elements(By.XPATH, NINE_DOTS_XPATH)
-                    if any(self._visible(element) for element in nine_dots):
-                        return True
+                    for xpath in NINE_DOTS_XPATHS:
+                        nine_dots = driver.find_elements(By.XPATH, xpath)
+                        if any(self._visible(element) for element in nine_dots):
+                            return True
                 text = self._page_text(driver)
                 if NICE_INCONTACT_URL_MARKER in current_url and any(
                     marker.lower() in f"{title}\n{text}".lower()
@@ -439,9 +471,9 @@ class IncontactExtractor:
 
     def _open_max_from_nice(self, driver) -> None:
         existing_handles = set(driver.window_handles)
-        self._click_xpath_any_frame(driver, NINE_DOTS_XPATH, timeout=60)
+        self._click_first_xpath_any_frame(driver, NINE_DOTS_XPATHS, timeout=60)
         time.sleep(0.6)
-        self._click_xpath_any_frame(driver, MAX_APP_XPATH, timeout=30)
+        self._click_first_xpath_any_frame(driver, MAX_APP_XPATHS, timeout=30)
         self._switch_to_max_window(driver, existing_handles, timeout=45)
 
     def _max_visible_text(self, driver, max_depth: int = 4) -> str:
