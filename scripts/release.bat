@@ -46,11 +46,7 @@ if "%REPO%"=="" (
 for /f "tokens=*" %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
 
 echo === Bumping version to %VERSION% ===
-powershell -NoProfile -Command ^
-    "$ErrorActionPreference = 'Stop';" ^
-    "(Get-Content pyproject.toml -Raw) -replace '(?m)^version = \"[^\"]+\"', 'version = \"%VERSION%\"' | Set-Content -NoNewline pyproject.toml;" ^
-    "(Get-Content src\email_triage\__init__.py -Raw) -replace '__version__ = \"[^\"]+\"', '__version__ = \"%VERSION%\"' | Set-Content -NoNewline src\email_triage\__init__.py;" ^
-    "(Get-Content README.md -Raw) -replace 'MitchelNLP-v[0-9.]+-windows-x64\.exe', 'MitchelNLP-v%VERSION%-windows-x64.exe' -replace 'download/v[0-9.]+/', 'download/v%VERSION%/' | Set-Content -NoNewline README.md"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bump_version.ps1" -Version "%VERSION%"
 if errorlevel 1 goto :error
 
 echo === Committing version bump ===
