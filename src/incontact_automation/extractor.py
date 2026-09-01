@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -29,6 +30,7 @@ NICE_LOGGED_IN_TEXT_MARKERS = (
 )
 MAX_EMAILS_PER_RUN = int(os.environ.get("PCC_MAX_EMAILS_PER_RUN", "25"))
 NEXT_EMAIL_ACCEPT_WAIT_SECONDS = int(os.environ.get("PCC_NEXT_EMAIL_ACCEPT_WAIT_SECONDS", "45"))
+CHROME_DEBUGGER_ADDRESS = "127.0.0.1:9225"
 MAX_URL = "https://max.niceincontact.com/index.html"
 NINE_DOTS_XPATHS = (
     "/html/body/app-root/div/div/cxone-header-v2/header/div[1]/div[1]/div[1]/sol-icon",
@@ -61,14 +63,16 @@ ASSIGNED_EMAIL_OPEN_XPATHS = (
     "//*[normalize-space()='Park Email']",
 )
 ASSIGNED_EMAIL_SUBJECT_XPATHS = (
+    "/html/body/div[1]/div/div[3]/div[3]/div[1]/div[2]/div/div/div[2]/div/div/div"
+    "/div[1]/div[5]/div[1]/div[2]/div[1]/input",
+    '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]',
     '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]/input',
     '//*[@id="email-container"]//input',
-    '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]',
 )
 ASSIGNED_EMAIL_BODY_IFRAME_XPATH = '//*[@id="email-container"]/div[5]/iframe'
 ASSIGNED_EMAIL_BODY_XPATHS = (
-    "/html/body/div[1]",
     "/html/body/div[1]/p[2]",
+    "/html/body/div[1]",
     "/html/body",
 )
 REPLY_BUTTON_XPATHS = (
@@ -146,6 +150,41 @@ def _safe_filename(value: str) -> str:
     return cleaned[:80] or "email"
 
 
+def _read_clipboard_text() -> str:
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        return root.clipboard_get()
+    except tk.TclError:
+        return ""
+    finally:
+        root.destroy()
+
+
+def _set_clipboard_text(text: str) -> None:
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+    finally:
+        root.destroy()
+
+
+def _is_debugger_port_open(address: str) -> bool:
+    host, port_text = address.rsplit(":", 1)
+    try:
+        with socket.create_connection((host, int(port_text)), timeout=0.35):
+            return True
+    except OSError:
+        return False
+
+
 class IncontactExtractor:
     """Drive the live MAX Accept -> Reply -> Park loop with Selenium."""
 
@@ -184,7 +223,7 @@ class IncontactExtractor:
         try:
             control.checkpoint()
             progress(0, MAX_EMAILS_PER_RUN, "Opening NICE CXone")
-            driver.get(NICE_INCONTACT_URL)
+            self._open_or_focus_nice(driver)
             if not self._is_nice_logged_in(driver, quick_timeout=6):
                 self.login_gate()
             control.checkpoint()
@@ -253,6 +292,11 @@ class IncontactExtractor:
         except ImportError as exc:
             raise RuntimeError("Selenium is not installed.") from exc
 
+        if _is_debugger_port_open(CHROME_DEBUGGER_ADDRESS):
+            attach_options = Options()
+            attach_options.debugger_address = CHROME_DEBUGGER_ADDRESS
+            return webdriver.Chrome(options=attach_options)
+
         chrome_binary = self._find_chrome()
 
         def options_for(profile: Path):
@@ -263,6 +307,10 @@ class IncontactExtractor:
             options.add_argument("--profile-directory=Default")
             options.add_argument("--no-first-run")
             options.add_argument("--no-default-browser-check")
+            options.add_argument(
+                f"--remote-debugging-port={CHROME_DEBUGGER_ADDRESS.rsplit(':', 1)[1]}"
+            )
+            options.add_experimental_option("detach", True)
             if chrome_binary:
                 options.binary_location = chrome_binary
             return options
@@ -397,6 +445,37 @@ class IncontactExtractor:
         )
         return normalize_text(str(text or ""))
 
+    def _copy_element_text(self, driver, element) -> str:
+        """Click/select/copy an element's text, falling back to its DOM value."""
+
+        from selenium.webdriver import Keys
+        from selenium.webdriver.common.action_chains import ActionChains
+
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+        except Exception:
+            pass
+
+        dom_text = self._element_text_or_value(driver, element)
+        try:
+            ActionChains(driver).move_to_element(element).click().perform()
+            time.sleep(0.15)
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL).perform()
+            time.sleep(0.15)
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("c").key_up(Keys.CONTROL).perform()
+            time.sleep(0.25)
+            clipboard_text = normalize_text(_read_clipboard_text())
+            if clipboard_text and (
+                not dom_text
+                or clipboard_text == dom_text
+                or len(clipboard_text) <= len(dom_text) + 200
+            ):
+                return clipboard_text
+        except Exception:
+            pass
+
+        return dom_text
+
     # -- NICE login / MAX navigation ----------------------------------------
 
     def _page_text(self, driver) -> str:
@@ -409,6 +488,23 @@ class IncontactExtractor:
                 return driver.find_element("tag name", "body").text
             except Exception:
                 return ""
+
+    def _switch_to_existing_nice_window(self, driver) -> bool:
+        for handle in driver.window_handles:
+            try:
+                driver.switch_to.window(handle)
+                if NICE_INCONTACT_URL_MARKER in driver.current_url:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _open_or_focus_nice(self, driver) -> None:
+        if self._switch_to_existing_nice_window(driver) and self._is_nice_logged_in(
+            driver, quick_timeout=2
+        ):
+            return
+        driver.get(NICE_INCONTACT_URL)
 
     def _is_nice_logged_in(self, driver, quick_timeout: int = 3) -> bool:
         from selenium.webdriver.common.by import By
@@ -631,7 +727,7 @@ class IncontactExtractor:
         for xpath in ASSIGNED_EMAIL_SUBJECT_XPATHS:
             try:
                 element = self._wait_xpath_any_frame(driver, xpath, timeout=12)
-                subject = normalize_text(self._element_text_or_value(driver, element))
+                subject = normalize_text(self._copy_element_text(driver, element))
                 if subject and subject.strip().lower() not in {"subject", "subject:"}:
                     return subject
             except Exception:
@@ -697,7 +793,7 @@ class IncontactExtractor:
                             None,
                         )
                     )
-                    body = normalize_text(self._element_text_or_value(driver, element))
+                    body = normalize_text(self._copy_element_text(driver, element))
                     if body:
                         driver.switch_to.default_content()
                         return body
@@ -738,6 +834,7 @@ class IncontactExtractor:
                 function fire(target) {
                     target.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: text}));
                     target.dispatchEvent(new Event('change', {bubbles: true}));
+                    target.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: ' '}));
                 }
 
                 function insertInto(target) {
@@ -851,6 +948,19 @@ class IncontactExtractor:
                 last_error = exc
             finally:
                 driver.switch_to.default_content()
+
+        try:
+            from selenium.webdriver import Keys
+            from selenium.webdriver.common.action_chains import ActionChains
+
+            _set_clipboard_text(text)
+            time.sleep(0.6)
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
+            time.sleep(0.8)
+            if self._reply_template_visible(driver, text):
+                return
+        except Exception as exc:
+            last_error = exc
 
         try:
             active_element = driver.switch_to.active_element
