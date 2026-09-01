@@ -61,14 +61,14 @@ ASSIGNED_EMAIL_OPEN_XPATHS = (
     "//*[normalize-space()='Park Email']",
 )
 ASSIGNED_EMAIL_SUBJECT_XPATHS = (
-    '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]',
     '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]/input',
     '//*[@id="email-container"]//input',
+    '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]',
 )
 ASSIGNED_EMAIL_BODY_IFRAME_XPATH = '//*[@id="email-container"]/div[5]/iframe'
 ASSIGNED_EMAIL_BODY_XPATHS = (
-    "/html/body/div[1]/p[2]",
     "/html/body/div[1]",
+    "/html/body/div[1]/p[2]",
     "/html/body",
 )
 REPLY_BUTTON_XPATHS = (
@@ -632,7 +632,7 @@ class IncontactExtractor:
             try:
                 element = self._wait_xpath_any_frame(driver, xpath, timeout=12)
                 subject = normalize_text(self._element_text_or_value(driver, element))
-                if subject:
+                if subject and subject.strip().lower() not in {"subject", "subject:"}:
                     return subject
             except Exception:
                 pass
