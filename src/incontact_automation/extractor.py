@@ -69,11 +69,15 @@ ASSIGNED_EMAIL_SUBJECT_XPATHS = (
     '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]/input',
     '//*[@id="email-container"]//input',
 )
-ASSIGNED_EMAIL_BODY_IFRAME_XPATH = '//*[@id="email-container"]/div[5]/iframe'
+ASSIGNED_EMAIL_BODY_IFRAME_XPATHS = (
+    "/html/body/div[1]/div/div[3]/div[3]/div[1]/div[2]/div/div/div[2]/div/div/div"
+    "/div[1]/div[5]/iframe",
+    '//*[@id="email-container"]/div[5]/iframe',
+)
 ASSIGNED_EMAIL_BODY_XPATHS = (
-    "/html/body/div[1]/p[2]",
-    "/html/body/div[1]",
     "/html/body",
+    "/html/body/div[1]",
+    "/html/body/div[1]/p[2]",
 )
 REPLY_BUTTON_XPATHS = (
     '//*[@id="email-container"]/div[4]/div[2]/button[3]',
@@ -779,11 +783,21 @@ class IncontactExtractor:
 
         try:
             driver.switch_to.default_content()
-            iframe = WebDriverWait(driver, 20).until(
-                lambda d: self._find_in_frames(
-                    d, By.XPATH, ASSIGNED_EMAIL_BODY_IFRAME_XPATH, require_enabled=False
-                )
-            )
+            iframe = None
+            last_iframe_error: Exception | None = None
+            for iframe_xpath in ASSIGNED_EMAIL_BODY_IFRAME_XPATHS:
+                try:
+                    driver.switch_to.default_content()
+                    iframe = WebDriverWait(driver, 20).until(
+                        lambda d, xp=iframe_xpath: self._find_in_frames(
+                            d, By.XPATH, xp, require_enabled=False
+                        )
+                    )
+                    break
+                except Exception as exc:
+                    last_iframe_error = exc
+            if iframe is None:
+                raise RuntimeError(f"accepted email body iframe not found: {last_iframe_error}")
             driver.switch_to.frame(iframe)
             for xpath in ASSIGNED_EMAIL_BODY_XPATHS:
                 try:
