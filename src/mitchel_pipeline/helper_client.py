@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import SmartAdvisorJob
-from .run_control import RunCancelled, RunControl
+from .run_control import ParkRequested, RunCancelled, RunControl
 
 HelperProgress = Callable[[str, str], None]
 
@@ -105,10 +105,14 @@ class SmartAdvisorHelperClient:
         self.start()
         self._send({"type": "run", "job": job.to_dict(), "leave_open": leave_open})
         helper_paused = False
+        parking = False
         while True:
             if control.cancelled:
                 self._send({"type": "cancel"})
                 raise RunCancelled()
+            if not parking and control.consume_park_request():
+                parking = True
+                self._send({"type": "cancel"})
             if control.paused != helper_paused:
                 helper_paused = control.paused
                 self._send({"type": "pause" if helper_paused else "resume"})
@@ -120,13 +124,19 @@ class SmartAdvisorHelperClient:
             if message_type == "progress":
                 progress(str(message.get("step", "")), str(message.get("message", "")))
             elif message_type == "result":
+                if parking:
+                    raise ParkRequested()
                 return dict(message.get("result") or {})
             elif message_type == "error":
+                if parking:
+                    raise ParkRequested()
                 raise SmartAdvisorHelperError(
                     str(message.get("code") or "smartadvisor_error"),
                     str(message["step"]) if message.get("step") is not None else None,
                 )
             elif message_type in {"cancelled", "eof"}:
+                if parking:
+                    raise ParkRequested()
                 raise RunCancelled() if message_type == "cancelled" else RuntimeError("helper_stopped")
 
     def close(self) -> None:

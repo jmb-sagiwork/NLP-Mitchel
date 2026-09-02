@@ -11,7 +11,7 @@ from .helper_client import SmartAdvisorHelperClient, SmartAdvisorHelperError
 from .jobs import deduplicate_jobs, jobs_from_result
 from .models import ExtractedEmail, PipelineEvent, RunSummary, SmartAdvisorJob
 from .results_workbook import ResultsWorkbook
-from .run_control import RunCancelled, RunControl
+from .run_control import ParkRequested, RunCancelled, RunControl
 
 EventCallback = Callable[[PipelineEvent], None]
 ExtractedCallback = Callable[[ExtractedEmail], None]
@@ -36,6 +36,8 @@ class Extractor(Protocol):
     ) -> Iterable[ExtractedEmail]: ...
 
     def send_reply(self, reply_text: str) -> None: ...
+
+    def park_now(self) -> None: ...
 
     def close(self) -> None: ...
 
@@ -214,52 +216,63 @@ class PipelineOrchestrator:
                     )
                     continue
 
-                last_reply = MANUAL_REVIEW_REPLY
-                for job_index, job in enumerate(jobs):
-                    job_start = slice_start + slice_span * (
-                        0.35 + (job_index / len(jobs)) * 0.55
-                    )
-                    job_span = slice_span * 0.55 / len(jobs)
+                try:
+                    last_reply = MANUAL_REVIEW_REPLY
+                    for job_index, job in enumerate(jobs):
+                        job_start = slice_start + slice_span * (
+                            0.35 + (job_index / len(jobs)) * 0.55
+                        )
+                        job_span = slice_span * 0.55 / len(jobs)
 
-                    if self.salesforce is not None:
-                        try:
-                            site_id = self.salesforce.site_id_for_claim(job.claim_id)
-                            job = dataclasses.replace(job, site_id=site_id)
-                        except Exception as exc:
-                            self._event(
-                                "status",
-                                f"Salesforce Site ID lookup failed: {type(exc).__name__}",
-                                job_start,
-                            )
+                        if self.salesforce is not None:
+                            try:
+                                site_id = self.salesforce.site_id_for_claim(job.claim_id)
+                                job = dataclasses.replace(job, site_id=site_id)
+                            except Exception as exc:
+                                self._event(
+                                    "status",
+                                    f"Salesforce Site ID lookup failed: {type(exc).__name__}",
+                                    job_start,
+                                )
 
-                    helper_result = self._run_smartadvisor_job(
-                        job,
-                        control,
-                        summary,
-                        job_start,
-                        job_span,
+                        helper_result = self._run_smartadvisor_job(
+                            job,
+                            control,
+                            summary,
+                            job_start,
+                            job_span,
+                        )
+                        summary.jobs_completed += 1
+                        reply = str(
+                            helper_result.get("reply_template")
+                            or "SmartAdvisor processing completed."
+                        )
+                        last_reply = reply
+                        self._approve_or_stop(reply, control, summary)
+                        self.results_workbook.append_result(job, helper_result, reply_sent=True)
+                        self._event(
+                            "summary",
+                            summary.display(),
+                            job_start + job_span,
+                            summary.to_dict(),
+                        )
+
+                    self.extractor.send_reply(last_reply)
+                    self._event(
+                        "progress",
+                        f"Finished email {email_index} of {total}",
+                        slice_start + slice_span,
                     )
-                    summary.jobs_completed += 1
-                    reply = str(
-                        helper_result.get("reply_template")
-                        or "SmartAdvisor processing completed."
-                    )
-                    last_reply = reply
-                    self._approve_or_stop(reply, control, summary)
-                    self.results_workbook.append_result(job, helper_result, reply_sent=True)
+                except ParkRequested:
+                    summary.parked += 1
+                    self.extractor.park_now()
                     self._event(
                         "summary",
-                        summary.display(),
-                        job_start + job_span,
+                        f"Parked email {email_index} of {total} (operator request)",
+                        slice_start + slice_span,
                         summary.to_dict(),
                     )
-
-                self.extractor.send_reply(last_reply)
-                self._event(
-                    "progress",
-                    f"Finished email {email_index} of {total}",
-                    slice_start + slice_span,
-                )
+                    continue
 
             message = "Workflow complete" if summary.extracted else "No CXone emails found"
             self._event("complete", message, 100, summary.to_dict())
@@ -283,6 +296,8 @@ class PipelineOrchestrator:
     ) -> dict[str, object]:
         while True:
             control.checkpoint()
+            if control.consume_park_request():
+                raise ParkRequested()
 
             def helper_progress(step: str, message: str) -> None:
                 step_fraction = {

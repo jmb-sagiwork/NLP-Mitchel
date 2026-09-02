@@ -279,6 +279,10 @@ class MitchelApp(QWidget):
         self.pause_button.setEnabled(False)
         self.pause_button.clicked.connect(self._toggle_pause)
         controls.addWidget(self.pause_button)
+        self.park_button = QPushButton("Park It", body)
+        self.park_button.setEnabled(False)
+        self.park_button.clicked.connect(self._park_it)
+        controls.addWidget(self.park_button)
         body_layout.addLayout(controls)
 
         self.extracted_popup_enabled = threading.Event()
@@ -421,6 +425,7 @@ class MitchelApp(QWidget):
         self.start_button.setEnabled(False)
         self.pause_button.setEnabled(True)
         self.pause_button.setText("Pause")
+        self.park_button.setEnabled(True)
         self.minilm_check.setEnabled(False)
         self.skip_count_box.setEnabled(False)
         self.extractor = IncontactExtractor(login_gate=self._manual_login_gate)
@@ -486,10 +491,17 @@ class MitchelApp(QWidget):
         if self.closing and (self.worker is None or not self.worker.is_alive()):
             self.close()
 
+    def _park_it(self) -> None:
+        if self.control is None:
+            return
+        self.control.request_park()
+        self.status_label.setText("Parking current email")
+
     def _run_stopped(self) -> None:
         self._set_run_state("idle")
         self.pause_button.setEnabled(False)
         self.pause_button.setText("Pause")
+        self.park_button.setEnabled(False)
         self.start_button.setEnabled(True)
         self.minilm_check.setEnabled(True)
         self.skip_count_box.setEnabled(True)

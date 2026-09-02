@@ -8,7 +8,7 @@ from email_triage.types import FieldValue, TriageResult, TriageStatus
 from mitchel_pipeline.helper_client import SmartAdvisorHelperError
 from mitchel_pipeline.models import ExtractedEmail
 from mitchel_pipeline.orchestrator import PipelineOrchestrator
-from mitchel_pipeline.run_control import RunControl
+from mitchel_pipeline.run_control import ParkRequested, RunControl
 
 
 class FakeExtractor:
@@ -16,6 +16,7 @@ class FakeExtractor:
         self.emails = emails
         self.closed = False
         self.replies_sent = []
+        self.parked = 0
 
     def extract(self, control, progress):
         progress(0, len(self.emails), "extracting")
@@ -24,6 +25,9 @@ class FakeExtractor:
 
     def send_reply(self, reply_text):
         self.replies_sent.append(reply_text)
+
+    def park_now(self):
+        self.parked += 1
 
     def close(self):
         self.closed = True
@@ -64,6 +68,9 @@ class OrderedExtractor:
     def send_reply(self, reply_text):
         self.order.append(f"send:{reply_text}")
 
+    def park_now(self):
+        self.order.append("park")
+
     def close(self):
         self.closed = True
 
@@ -76,6 +83,26 @@ class OrderedHelper:
     def run_job(self, job, control, progress, *, leave_open=True):
         assert leave_open is False
         self.order.append(f"smartadvisor:{job.source_message_id}")
+        progress("complete", "complete")
+        return {"reply_template": f"reply:{job.source_message_id}"}
+
+    def close(self):
+        self.closed = True
+
+
+class ParkingHelper:
+    """SmartAdvisor helper that raises ParkRequested on its first job."""
+
+    def __init__(self, order):
+        self.order = order
+        self.closed = False
+        self.calls = 0
+
+    def run_job(self, job, control, progress, *, leave_open=True):
+        self.calls += 1
+        self.order.append(f"smartadvisor:{job.source_message_id}")
+        if self.calls == 1:
+            raise ParkRequested()
         progress("complete", "complete")
         return {"reply_template": f"reply:{job.source_message_id}"}
 
@@ -205,3 +232,38 @@ def test_declining_the_reply_stops_the_run_without_sending(monkeypatch):
     assert "extract:email-2" not in order
     assert extractor.closed and helper.closed
     assert events[-1].kind == "status" and events[-1].message == "Run cancelled"
+
+
+def test_park_it_aborts_the_job_and_continues_to_the_next_email(monkeypatch):
+    emails = [
+        ExtractedEmail("email-1", "Bill 1", "body 1", Path("email-1.txt")),
+        ExtractedEmail("email-2", "Bill 2", "body 2", Path("email-2.txt")),
+    ]
+    order = []
+    extractor = OrderedExtractor(emails, order)
+    helper = ParkingHelper(order)
+
+    monkeypatch.setattr(
+        "mitchel_pipeline.orchestrator.classify_email", lambda *a, **k: bill_result()
+    )
+    orchestrator = PipelineOrchestrator(
+        extractor,
+        enable_minilm=False,
+        helper=helper,
+        engine=object(),
+        on_reply=lambda _reply: True,
+    )
+
+    summary = orchestrator.run(RunControl())
+
+    assert order == [
+        "extract:email-1",
+        "smartadvisor:email-1",
+        "park",
+        "extract:email-2",
+        "smartadvisor:email-2",
+        "send:reply:email-2",
+    ]
+    assert summary.parked == 1
+    assert summary.jobs_completed == 1
+    assert extractor.closed and helper.closed

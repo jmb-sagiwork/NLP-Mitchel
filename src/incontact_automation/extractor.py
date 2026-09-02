@@ -284,6 +284,15 @@ class IncontactExtractor:
         self._paste_reply_template(driver, full_reply)
         self._click_park_email(driver)
 
+    def park_now(self) -> None:
+        """Park the currently open MAX email immediately, with no reply pasted."""
+
+        with self._driver_lock:
+            driver = self._driver
+        if driver is None:
+            raise RuntimeError("no active MAX session to park")
+        self._click_park_email(driver)
+
     # -- driver setup --------------------------------------------------
 
     def _create_driver(self):
