@@ -6,7 +6,7 @@ else is internal and may move.
 
 from __future__ import annotations
 
-__version__ = "0.2.25"
+__version__ = "0.2.26"
 
 from .api import classify_email, classify_emails  # noqa: E402
 from .engine import TriageEngine, get_default_engine  # noqa: E402
