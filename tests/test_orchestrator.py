@@ -15,6 +15,7 @@ class FakeExtractor:
     def __init__(self, emails):
         self.emails = emails
         self.closed = False
+        self.opened_replies = []
         self.replies_sent = []
         self.attachments_sent = []
         self.parked = 0
@@ -24,9 +25,16 @@ class FakeExtractor:
         progress(len(self.emails), len(self.emails), "extracted")
         return self.emails
 
-    def send_reply(self, reply_text, attachments=None):
-        self.replies_sent.append(reply_text)
+    def open_reply(self, reply_text):
+        self.opened_replies.append(reply_text)
+
+    def finalize_reply(self, attachments=None):
+        self.replies_sent.append(self.opened_replies[-1])
         self.attachments_sent.append(attachments)
+
+    def send_reply(self, reply_text, attachments=None):
+        self.open_reply(reply_text)
+        self.finalize_reply(attachments)
 
     def park_now(self):
         self.parked += 1
@@ -58,6 +66,7 @@ class OrderedExtractor:
         self.emails = emails
         self.order = order
         self.closed = False
+        self._last_opened = None
 
     def extract(self, control, progress):
         total = len(self.emails)
@@ -67,11 +76,19 @@ class OrderedExtractor:
             progress(index, total, "extracted")
             yield email
 
-    def send_reply(self, reply_text, attachments=None):
+    def open_reply(self, reply_text):
+        self._last_opened = reply_text
+        self.order.append(f"open:{reply_text}")
+
+    def finalize_reply(self, attachments=None):
         if attachments:
-            self.order.append(f"send:{reply_text}:attach={list(attachments)}")
+            self.order.append(f"send:{self._last_opened}:attach={list(attachments)}")
         else:
-            self.order.append(f"send:{reply_text}")
+            self.order.append(f"send:{self._last_opened}")
+
+    def send_reply(self, reply_text, attachments=None):
+        self.open_reply(reply_text)
+        self.finalize_reply(attachments)
 
     def park_now(self):
         self.order.append("park")
@@ -216,11 +233,13 @@ def test_each_email_finishes_before_the_next_email_is_extracted(monkeypatch):
         "extract:email-1",
         "nlp:email-1",
         "smartadvisor:email-1",
+        "open:reply:email-1",
         "reply:email-1",
         "send:reply:email-1",
         "extract:email-2",
         "nlp:email-2",
         "smartadvisor:email-2",
+        "open:reply:email-2",
         "reply:email-2",
         "send:reply:email-2",
     ]
@@ -287,6 +306,7 @@ def test_park_it_aborts_the_job_and_continues_to_the_next_email(monkeypatch):
         "park",
         "extract:email-2",
         "smartadvisor:email-2",
+        "open:reply:email-2",
         "send:reply:email-2",
     ]
     assert summary.parked == 1
@@ -323,8 +343,10 @@ def test_sent_manually_on_smartadvisor_job_skips_reply_and_continues(monkeypatch
     assert order == [
         "extract:email-1",
         "smartadvisor:email-1",
+        "open:reply:email-1",
         "extract:email-2",
         "smartadvisor:email-2",
+        "open:reply:email-2",
         "send:reply:email-2",
     ]
     assert summary.sent_manually == 1

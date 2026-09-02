@@ -35,6 +35,10 @@ class Extractor(Protocol):
         progress: Callable[[int, int, str], None],
     ) -> Iterable[ExtractedEmail]: ...
 
+    def open_reply(self, reply_text: str) -> None: ...
+
+    def finalize_reply(self, attachments: Sequence[str] | None = None) -> None: ...
+
     def send_reply(self, reply_text: str, attachments: Sequence[str] | None = None) -> None: ...
 
     def park_now(self) -> None: ...
@@ -195,9 +199,10 @@ class PipelineOrchestrator:
                             "error_code": type(exc).__name__,
                         }
                     )
+                    self.extractor.open_reply(MANUAL_REVIEW_REPLY)
                     try:
                         self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
-                        self.extractor.send_reply(MANUAL_REVIEW_REPLY)
+                        self.extractor.finalize_reply(None)
                     except SentManually:
                         summary.sent_manually += 1
                         self._event(
@@ -224,9 +229,10 @@ class PipelineOrchestrator:
 
                 if not jobs:
                     summary.skipped += 1
+                    self.extractor.open_reply(MANUAL_REVIEW_REPLY)
                     try:
                         self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
-                        self.extractor.send_reply(MANUAL_REVIEW_REPLY)
+                        self.extractor.finalize_reply(None)
                     except SentManually:
                         summary.sent_manually += 1
                         self._event(
@@ -280,6 +286,7 @@ class PipelineOrchestrator:
                         eor_pdf_path = helper_result.get("eor_pdf_path")
                         if eor_pdf_path:
                             eor_paths.append(str(eor_pdf_path))
+                        self.extractor.open_reply(reply)
                         self._approve_or_stop(reply, control, summary)
                         self.results_workbook.append_result(job, helper_result, reply_sent=True)
                         self._event(
@@ -289,7 +296,7 @@ class PipelineOrchestrator:
                             summary.to_dict(),
                         )
 
-                    self.extractor.send_reply(last_reply, eor_paths or None)
+                    self.extractor.finalize_reply(eor_paths or None)
                     self._event(
                         "progress",
                         f"Finished email {email_index} of {total}",

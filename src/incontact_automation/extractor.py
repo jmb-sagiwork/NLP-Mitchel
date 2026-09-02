@@ -276,8 +276,15 @@ class IncontactExtractor:
         finally:
             self.close()
 
-    def send_reply(self, reply_text: str, attachments: Sequence[str] | None = None) -> None:
-        """Reply to the currently open MAX email, then Park it (never Send)."""
+    def open_reply(self, reply_text: str) -> None:
+        """Open the Reply box (if not already open) and paste `reply_text` into it.
+
+        Safe to call more than once for the same email -- each call replaces
+        whatever is currently in the compose box, so the operator's
+        Approve/Decline/Sent Manually dialog always reflects the reply that is
+        already sitting in MAX by the time it appears, including when a later
+        SmartAdvisor job's reply supersedes an earlier one.
+        """
 
         with self._driver_lock:
             driver = self._driver
@@ -285,11 +292,27 @@ class IncontactExtractor:
             raise RuntimeError("no active MAX session to reply on")
 
         full_reply = f"{reply_text.rstrip()}{REPLY_SIGNATURE}"
-        self._click_reply_button(driver)
+        if not self._reply_box_open(driver):
+            self._click_reply_button(driver)
         self._paste_reply_template(driver, full_reply)
+
+    def finalize_reply(self, attachments: Sequence[str] | None = None) -> None:
+        """Attach any files to the already-open, already-pasted reply, then Park it."""
+
+        with self._driver_lock:
+            driver = self._driver
+        if driver is None:
+            raise RuntimeError("no active MAX session to reply on")
+
         if attachments:
             self._attach_files(driver, attachments)
         self._click_park_email(driver)
+
+    def send_reply(self, reply_text: str, attachments: Sequence[str] | None = None) -> None:
+        """Reply to the currently open MAX email, then Park it (never Send)."""
+
+        self.open_reply(reply_text)
+        self.finalize_reply(attachments)
 
     def park_now(self) -> None:
         """Park the currently open MAX email immediately, with no reply pasted."""
@@ -892,6 +915,23 @@ class IncontactExtractor:
                 last_error = exc
         raise RuntimeError(f"MAX email Reply button not found: {last_error}")
 
+    def _reply_box_open(self, driver) -> bool:
+        """True if the reply compose editor is already open and visible.
+
+        Lets `open_reply` skip re-clicking Reply for a second/third SmartAdvisor
+        job on the same email -- it only needs to replace the text already there.
+        """
+        driver.switch_to.default_content()
+        try:
+            return any(
+                self._find_in_frames(driver, By.XPATH, xpath, require_enabled=False) is not None
+                for xpath in REPLY_COMPOSE_EDITOR_XPATHS
+            )
+        except Exception:
+            return False
+        finally:
+            driver.switch_to.default_content()
+
     def _insert_text_into_editor(self, driver, element, text: str) -> bool:
         return bool(
             driver.execute_script(
@@ -911,10 +951,8 @@ class IncontactExtractor:
                     target.focus();
 
                     if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') {
-                        const start = target.selectionStart || 0;
-                        const end = target.selectionEnd || start;
-                        target.value = target.value.slice(0, start) + text + target.value.slice(end);
-                        target.selectionStart = target.selectionEnd = start + text.length;
+                        target.value = text;
+                        target.selectionStart = target.selectionEnd = text.length;
                         fire(target);
                         return true;
                     }
@@ -932,28 +970,31 @@ class IncontactExtractor:
                     editable.focus();
                     const selection = doc.getSelection();
                     if (selection && editable.isContentEditable) {
+                        // Select the box's entire existing content (not just a
+                        // collapsed cursor) so insertText REPLACES it -- this
+                        // runs once per reply, and again whenever a later
+                        // SmartAdvisor job's reply supersedes an earlier one.
                         const range = doc.createRange();
                         range.selectNodeContents(editable);
-                        range.collapse(true);
                         selection.removeAllRanges();
                         selection.addRange(range);
                         if (doc.execCommand && doc.execCommand('insertText', false, text)) {
                             fire(editable);
                             return true;
                         }
-                        range.insertNode(doc.createTextNode(text));
-                        range.collapse(false);
+                        editable.textContent = '';
+                        editable.appendChild(doc.createTextNode(text));
                         fire(editable);
                         return true;
                     }
 
                     if (editable.tagName === 'TEXTAREA' || editable.tagName === 'INPUT') {
-                        editable.value = text + editable.value;
+                        editable.value = text;
                         fire(editable);
                         return true;
                     }
 
-                    editable.textContent = text + "\\n" + editable.textContent;
+                    editable.textContent = text;
                     fire(editable);
                     return true;
                 }
@@ -1024,6 +1065,8 @@ class IncontactExtractor:
 
             _set_clipboard_text(text)
             time.sleep(0.6)
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL).perform()
+            ActionChains(driver).send_keys(Keys.DELETE).perform()
             ActionChains(driver).key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL).perform()
             time.sleep(0.8)
             if self._reply_template_visible(driver, text):
@@ -1033,6 +1076,8 @@ class IncontactExtractor:
 
         try:
             active_element = driver.switch_to.active_element
+            active_element.send_keys(Keys.CONTROL, "a")
+            active_element.send_keys(Keys.DELETE)
             active_element.send_keys(text)
             time.sleep(0.8)
             if self._reply_template_visible(driver, text):
