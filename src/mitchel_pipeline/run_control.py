@@ -11,6 +11,10 @@ class ParkRequested(RuntimeError):
     """Raised when the operator asks to park the current email right away."""
 
 
+class SentManually(RuntimeError):
+    """Raised when the operator says the reply was already sent manually."""
+
+
 class RunControl:
     """Thread-safe pause, resume, and cancellation state."""
 

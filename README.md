@@ -61,7 +61,7 @@ to a lazily-built default, which is fine for a script and wasteful in a server.
 
 ## Download Mitchel NLP (Windows, no install)
 
-**[MitchelNLP-v0.2.22-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.2.22/MitchelNLP-v0.2.22-windows-x64.exe)** — the complete attended application in one executable. Download and double-click to run.
+**[MitchelNLP-v0.2.23-windows-x64.exe](https://github.com/jmb-sagiwork/NLP-Mitchel/releases/download/v0.2.23/MitchelNLP-v0.2.23-windows-x64.exe)** — the complete attended application in one executable. Download and double-click to run.
 
 The executable contains Python, the MiniLM encoder, Selenium, and the x86
 SmartAdvisor helper. The target machine still needs Google Chrome and an
@@ -71,7 +71,7 @@ model download. ([all releases](https://github.com/jmb-sagiwork/NLP-Mitchel/rele
 Run the packaged diagnostic first on a new machine:
 
 ```powershell
-.\MitchelNLP-v0.2.22-windows-x64.exe --selftest
+.\MitchelNLP-v0.2.23-windows-x64.exe --selftest
 ```
 
 It writes `mitchel-selftest.json` beside the executable and verifies MiniLM,

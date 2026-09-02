@@ -16,6 +16,7 @@ class FakeExtractor:
         self.emails = emails
         self.closed = False
         self.replies_sent = []
+        self.attachments_sent = []
         self.parked = 0
 
     def extract(self, control, progress):
@@ -23,8 +24,9 @@ class FakeExtractor:
         progress(len(self.emails), len(self.emails), "extracted")
         return self.emails
 
-    def send_reply(self, reply_text):
+    def send_reply(self, reply_text, attachments=None):
         self.replies_sent.append(reply_text)
+        self.attachments_sent.append(attachments)
 
     def park_now(self):
         self.parked += 1
@@ -65,8 +67,11 @@ class OrderedExtractor:
             progress(index, total, "extracted")
             yield email
 
-    def send_reply(self, reply_text):
-        self.order.append(f"send:{reply_text}")
+    def send_reply(self, reply_text, attachments=None):
+        if attachments:
+            self.order.append(f"send:{reply_text}:attach={list(attachments)}")
+        else:
+            self.order.append(f"send:{reply_text}")
 
     def park_now(self):
         self.order.append("park")
@@ -105,6 +110,26 @@ class ParkingHelper:
             raise ParkRequested()
         progress("complete", "complete")
         return {"reply_template": f"reply:{job.source_message_id}"}
+
+    def close(self):
+        self.closed = True
+
+
+class EorHelper:
+    """SmartAdvisor helper whose jobs each produce an EOR PDF path."""
+
+    def __init__(self, order):
+        self.order = order
+        self.closed = False
+
+    def run_job(self, job, control, progress, *, leave_open=True):
+        assert leave_open is False
+        self.order.append(f"smartadvisor:{job.source_message_id}")
+        progress("complete", "complete")
+        return {
+            "reply_template": f"reply:{job.source_message_id}",
+            "eor_pdf_path": f"C:/eors/{job.source_message_id}.pdf",
+        }
 
     def close(self):
         self.closed = True
@@ -174,7 +199,7 @@ def test_each_email_finishes_before_the_next_email_is_extracted(monkeypatch):
 
     def approve_reply(reply):
         order.append(reply)
-        return True
+        return "approve"
 
     monkeypatch.setattr("mitchel_pipeline.orchestrator.classify_email", classify)
     orchestrator = PipelineOrchestrator(
@@ -223,7 +248,7 @@ def test_declining_the_reply_stops_the_run_without_sending(monkeypatch):
         helper=helper,
         engine=object(),
         emit=events.append,
-        on_reply=lambda _reply: False,
+        on_reply=lambda _reply: "decline",
     )
 
     summary = orchestrator.run(RunControl())
@@ -251,7 +276,7 @@ def test_park_it_aborts_the_job_and_continues_to_the_next_email(monkeypatch):
         enable_minilm=False,
         helper=helper,
         engine=object(),
-        on_reply=lambda _reply: True,
+        on_reply=lambda _reply: "approve",
     )
 
     summary = orchestrator.run(RunControl())
@@ -266,4 +291,90 @@ def test_park_it_aborts_the_job_and_continues_to_the_next_email(monkeypatch):
     ]
     assert summary.parked == 1
     assert summary.jobs_completed == 1
+    assert extractor.closed and helper.closed
+
+
+def test_sent_manually_on_smartadvisor_job_skips_reply_and_continues(monkeypatch):
+    emails = [
+        ExtractedEmail("email-1", "Bill 1", "body 1", Path("email-1.txt")),
+        ExtractedEmail("email-2", "Bill 2", "body 2", Path("email-2.txt")),
+    ]
+    order = []
+    extractor = OrderedExtractor(emails, order)
+    helper = OrderedHelper(order)
+
+    monkeypatch.setattr(
+        "mitchel_pipeline.orchestrator.classify_email", lambda *a, **k: bill_result()
+    )
+
+    def on_reply(reply):
+        return "sent_manually" if reply == "reply:email-1" else "approve"
+
+    orchestrator = PipelineOrchestrator(
+        extractor,
+        enable_minilm=False,
+        helper=helper,
+        engine=object(),
+        on_reply=on_reply,
+    )
+
+    summary = orchestrator.run(RunControl())
+
+    assert order == [
+        "extract:email-1",
+        "smartadvisor:email-1",
+        "extract:email-2",
+        "smartadvisor:email-2",
+        "send:reply:email-2",
+    ]
+    assert summary.sent_manually == 1
+    assert summary.jobs_completed == 2
+    assert extractor.closed and helper.closed
+
+
+def test_sent_manually_on_manual_review_reply_skips_reply(monkeypatch):
+    email = ExtractedEmail("email-1", "Bill", "body", Path("email.txt"))
+    extractor = FakeExtractor([email])
+    helper = RetryHelper()
+
+    def classify(*_args, **_kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr("mitchel_pipeline.orchestrator.classify_email", classify)
+    orchestrator = PipelineOrchestrator(
+        extractor,
+        enable_minilm=False,
+        helper=helper,
+        engine=object(),
+        on_reply=lambda _reply: "sent_manually",
+    )
+
+    summary = orchestrator.run(RunControl())
+
+    assert extractor.replies_sent == []
+    assert extractor.parked == 0
+    assert summary.sent_manually == 1
+    assert summary.nlp_errors == 1
+    assert extractor.closed and helper.closed
+
+
+def test_eor_pdf_paths_are_collected_and_passed_to_send_reply(monkeypatch):
+    email = ExtractedEmail("email-1", "Bill", "body", Path("email.txt"))
+    extractor = FakeExtractor([email])
+    helper = EorHelper([])
+
+    monkeypatch.setattr(
+        "mitchel_pipeline.orchestrator.classify_email", lambda *a, **k: bill_result()
+    )
+    orchestrator = PipelineOrchestrator(
+        extractor,
+        enable_minilm=False,
+        helper=helper,
+        engine=object(),
+    )
+
+    orchestrator.run(RunControl())
+
+    assert extractor.replies_sent == ["reply:email-1"]
+    assert extractor.attachments_sent == [["C:/eors/email-1.pdf"]]
     assert extractor.closed and helper.closed

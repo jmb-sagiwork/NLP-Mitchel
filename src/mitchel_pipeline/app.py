@@ -338,16 +338,19 @@ class MitchelApp(QWidget):
         finally:
             complete.set()
 
-    def _blocking_confirm(self, title: str, message: str) -> bool:
-        """Ask the operator to approve/decline from the worker thread; block until answered."""
+    def _blocking_confirm(self, title: str, message: str) -> str:
+        """Ask the operator to approve/decline/sent-manually; block until answered.
+
+        Returns "approve", "decline", or "sent_manually".
+        """
 
         complete = threading.Event()
         self.dialog_events.append(complete)
-        result_holder: list[bool] = [False]
+        result_holder: list[str] = ["decline"]
         self.confirm_requested.emit(title, message, result_holder, complete)
         while not complete.wait(0.1):
             if self.control is None or self.control.cancelled:
-                return False
+                return "decline"
         return result_holder[0]
 
     def _show_confirm_now(
@@ -378,11 +381,12 @@ class MitchelApp(QWidget):
             format_nlp_output(result),
         )
 
-    def _show_reply(self, reply: str) -> bool:
+    def _show_reply(self, reply: str) -> str:
         return self._blocking_confirm(
             "Approve reply?",
             f"Approve to paste this reply and Park the email. Decline to stop the run "
-            f"immediately.\n\n{reply}",
+            f"immediately. Sent Manually if you already sent this reply yourself in MAX "
+            f"(no paste/park needed) and want to move on to the next email.\n\n{reply}",
         )
 
     def _show_layers(self, layers_used: tuple[str, ...]) -> None:

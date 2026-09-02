@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Protocol
 
 from email_triage import TriageEngine, classify_email
@@ -11,12 +11,12 @@ from .helper_client import SmartAdvisorHelperClient, SmartAdvisorHelperError
 from .jobs import deduplicate_jobs, jobs_from_result
 from .models import ExtractedEmail, PipelineEvent, RunSummary, SmartAdvisorJob
 from .results_workbook import ResultsWorkbook
-from .run_control import ParkRequested, RunCancelled, RunControl
+from .run_control import ParkRequested, RunCancelled, RunControl, SentManually
 
 EventCallback = Callable[[PipelineEvent], None]
 ExtractedCallback = Callable[[ExtractedEmail], None]
 NlpCallback = Callable[[dict[str, object]], None]
-ReplyCallback = Callable[[str], bool]
+ReplyCallback = Callable[[str], str]
 LayersCallback = Callable[[tuple[str, ...]], None]
 
 MANUAL_REVIEW_REPLY = (
@@ -35,7 +35,7 @@ class Extractor(Protocol):
         progress: Callable[[int, int, str], None],
     ) -> Iterable[ExtractedEmail]: ...
 
-    def send_reply(self, reply_text: str) -> None: ...
+    def send_reply(self, reply_text: str, attachments: Sequence[str] | None = None) -> None: ...
 
     def park_now(self) -> None: ...
 
@@ -87,16 +87,24 @@ class PipelineOrchestrator:
         self.engine = engine
         self.on_extracted = on_extracted or (lambda _email: None)
         self.on_nlp = on_nlp or (lambda _result: None)
-        self.on_reply = on_reply or (lambda _reply: True)
+        self.on_reply = on_reply or (lambda _reply: "approve")
         self.on_layers = on_layers or (lambda _layers: None)
         self.skip_count = max(skip_count, 0)
         self._progress = 0.0
 
     def _approve_or_stop(self, reply: str, control: RunControl, summary: RunSummary) -> None:
-        """Ask the operator to approve the generated reply; stop the run on decline."""
+        """Ask the operator to approve the generated reply.
 
-        if self.on_reply(reply):
+        Returns normally on approve. Raises SentManually if the operator already
+        sent the reply themselves in MAX, or RunCancelled (after stopping the run)
+        on decline.
+        """
+
+        outcome = self.on_reply(reply)
+        if outcome == "approve":
             return
+        if outcome == "sent_manually":
+            raise SentManually()
         self._event(
             "status",
             "Run stopped: reply declined",
@@ -187,8 +195,18 @@ class PipelineOrchestrator:
                             "error_code": type(exc).__name__,
                         }
                     )
-                    self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
-                    self.extractor.send_reply(MANUAL_REVIEW_REPLY)
+                    try:
+                        self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
+                        self.extractor.send_reply(MANUAL_REVIEW_REPLY)
+                    except SentManually:
+                        summary.sent_manually += 1
+                        self._event(
+                            "summary",
+                            f"Email {email_index} of {total} sent manually (operator)",
+                            slice_start + slice_span,
+                            summary.to_dict(),
+                        )
+                        continue
                     self._event(
                         "summary",
                         summary.display(),
@@ -206,8 +224,18 @@ class PipelineOrchestrator:
 
                 if not jobs:
                     summary.skipped += 1
-                    self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
-                    self.extractor.send_reply(MANUAL_REVIEW_REPLY)
+                    try:
+                        self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
+                        self.extractor.send_reply(MANUAL_REVIEW_REPLY)
+                    except SentManually:
+                        summary.sent_manually += 1
+                        self._event(
+                            "summary",
+                            f"Email {email_index} of {total} sent manually (operator)",
+                            slice_start + slice_span,
+                            summary.to_dict(),
+                        )
+                        continue
                     self._event(
                         "summary",
                         summary.display(),
@@ -218,6 +246,7 @@ class PipelineOrchestrator:
 
                 try:
                     last_reply = MANUAL_REVIEW_REPLY
+                    eor_paths: list[str] = []
                     for job_index, job in enumerate(jobs):
                         job_start = slice_start + slice_span * (
                             0.35 + (job_index / len(jobs)) * 0.55
@@ -248,6 +277,9 @@ class PipelineOrchestrator:
                             or "SmartAdvisor processing completed."
                         )
                         last_reply = reply
+                        eor_pdf_path = helper_result.get("eor_pdf_path")
+                        if eor_pdf_path:
+                            eor_paths.append(str(eor_pdf_path))
                         self._approve_or_stop(reply, control, summary)
                         self.results_workbook.append_result(job, helper_result, reply_sent=True)
                         self._event(
@@ -257,7 +289,7 @@ class PipelineOrchestrator:
                             summary.to_dict(),
                         )
 
-                    self.extractor.send_reply(last_reply)
+                    self.extractor.send_reply(last_reply, eor_paths or None)
                     self._event(
                         "progress",
                         f"Finished email {email_index} of {total}",
@@ -269,6 +301,15 @@ class PipelineOrchestrator:
                     self._event(
                         "summary",
                         f"Parked email {email_index} of {total} (operator request)",
+                        slice_start + slice_span,
+                        summary.to_dict(),
+                    )
+                    continue
+                except SentManually:
+                    summary.sent_manually += 1
+                    self._event(
+                        "summary",
+                        f"Email {email_index} of {total} sent manually (operator)",
                         slice_start + slice_span,
                         summary.to_dict(),
                     )

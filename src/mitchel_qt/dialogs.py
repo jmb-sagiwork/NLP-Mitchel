@@ -114,6 +114,11 @@ class ConfirmDialog(QDialog):
         decline_button = QPushButton("Decline", self)
         decline_button.clicked.connect(self.reject)
         footer.addWidget(decline_button)
+        sent_manually_button = QPushButton("Sent Manually", self)
+        sent_manually_button.clicked.connect(
+            lambda: self.done(ConfirmDialog.SentManually)
+        )
+        footer.addWidget(sent_manually_button)
         approve_button = QPushButton("Approve", self)
         th.set_class(approve_button, "accent")
         approve_button.setDefault(True)
@@ -123,8 +128,18 @@ class ConfirmDialog(QDialog):
 
         approve_button.setFocus()
 
+    SentManually = 2
 
-def show_confirm(parent: QWidget | None, title: str, message: str) -> bool:
-    """Show a blocking Approve/Decline dialog. Returns True only if approved."""
 
-    return ConfirmDialog(parent, title, message).exec() == QDialog.DialogCode.Accepted
+def show_confirm(parent: QWidget | None, title: str, message: str) -> str:
+    """Show a blocking Approve/Decline/Sent Manually dialog.
+
+    Returns "approve", "decline", or "sent_manually".
+    """
+
+    result = ConfirmDialog(parent, title, message).exec()
+    if result == QDialog.DialogCode.Accepted:
+        return "approve"
+    if result == ConfirmDialog.SentManually:
+        return "sent_manually"
+    return "decline"

@@ -13,7 +13,7 @@ import re
 import socket
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -84,6 +84,11 @@ REPLY_BUTTON_XPATHS = (
 PARK_EMAIL_BUTTON_XPATHS = (
     '//*[@id="email-container"]/div[4]/div[2]/button[6]',
     "//*[@id='email-container']//button[normalize-space()='Park Email']",
+)
+ADD_ATTACHMENT_INPUT_XPATHS = (
+    '//*[@id="email-container"]/div[5]/div[1]/div[2]/div[1]/div[2]/label/input',
+    "//label[.//span[contains(@class,'add-attachment-input-label-text')]]//input[@type='file']",
+    "//input[contains(@class,'add-attachment-input')]",
 )
 REPLY_COMPOSE_EDITOR_XPATHS = (
     '//*[@id="email-container"]//*[@contenteditable="true"]',
@@ -271,7 +276,7 @@ class IncontactExtractor:
         finally:
             self.close()
 
-    def send_reply(self, reply_text: str) -> None:
+    def send_reply(self, reply_text: str, attachments: Sequence[str] | None = None) -> None:
         """Reply to the currently open MAX email, then Park it (never Send)."""
 
         with self._driver_lock:
@@ -282,6 +287,8 @@ class IncontactExtractor:
         full_reply = f"{reply_text.rstrip()}{REPLY_SIGNATURE}"
         self._click_reply_button(driver)
         self._paste_reply_template(driver, full_reply)
+        if attachments:
+            self._attach_files(driver, attachments)
         self._click_park_email(driver)
 
     def park_now(self) -> None:
@@ -398,6 +405,47 @@ class IncontactExtractor:
 
         def locate(current_driver):
             return self._find_in_frames(current_driver, By.XPATH, xpath)
+
+        return WebDriverWait(driver, timeout).until(locate)
+
+    def _find_file_input_any_frame(self, driver, xpaths: tuple[str, ...], timeout: int = 30):
+        """Locate a (likely CSS-hidden) file input by XPath, walking iframes.
+
+        Unlike `_find_in_frames`, this does not require `is_displayed()` -- the
+        native <input type="file"> behind the styled "Add Attachment" label is
+        hidden and only its label/span is visible to a human clicking it.
+        """
+
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.common.by import By
+
+        def search(depth: int, max_depth: int = 4):
+            for xpath in xpaths:
+                for element in driver.find_elements(By.XPATH, xpath):
+                    return element
+            if depth >= max_depth:
+                return None
+            for frame in driver.find_elements(By.XPATH, "//iframe | //frame"):
+                entered = False
+                try:
+                    driver.switch_to.frame(frame)
+                    entered = True
+                    result = search(depth + 1, max_depth)
+                    if result is not None:
+                        return result
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        if entered:
+                            driver.switch_to.parent_frame()
+                    except Exception:
+                        driver.switch_to.default_content()
+            return None
+
+        def locate(current_driver):
+            current_driver.switch_to.default_content()
+            return search(0)
 
         return WebDriverWait(driver, timeout).until(locate)
 
@@ -993,6 +1041,22 @@ class IncontactExtractor:
             last_error = exc
 
         raise RuntimeError(f"reply template paste failed: {last_error}")
+
+    def _attach_files(self, driver, paths: Sequence[str]) -> None:
+        """Attach each file to the open MAX reply via the hidden file input.
+
+        Uses `send_keys` on the underlying <input type="file"> directly, which
+        sets the file programmatically without opening the native OS picker
+        that a human sees when clicking "Add Attachment".
+        """
+
+        for path in paths:
+            driver.switch_to.default_content()
+            file_input = self._find_file_input_any_frame(
+                driver, ADD_ATTACHMENT_INPUT_XPATHS, timeout=30
+            )
+            file_input.send_keys(str(Path(path).resolve()))
+            time.sleep(1.5)
 
     def _click_park_email(self, driver) -> None:
         driver.switch_to.default_content()

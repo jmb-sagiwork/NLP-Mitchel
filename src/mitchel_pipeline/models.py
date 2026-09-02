@@ -84,11 +84,13 @@ class RunSummary:
     nlp_errors: int = 0
     smartadvisor_errors: int = 0
     parked: int = 0
+    sent_manually: int = 0
 
     def display(self) -> str:
         return (
             f"Emails {self.extracted}  |  Jobs {self.jobs_completed}/{self.jobs_created}"
             f"  |  Skipped {self.skipped}  |  Parked {self.parked}"
+            f"  |  Sent Manually {self.sent_manually}"
         )
 
     def to_dict(self) -> dict[str, int]:
