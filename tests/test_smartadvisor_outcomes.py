@@ -52,7 +52,7 @@ def test_reply_templates_cover_no_match_denied_and_paid():
         **common,
     )
 
-    assert "Concern: No Bill on File" in no_match
+    assert "We could not locate a bill matching claim" in no_match
     assert "has been completed processing and denied" in denied
     assert "Denial Reason : Bill has been denied with CO-16." in denied
     assert "has been completed processing and paid" in paid
@@ -98,7 +98,7 @@ def test_no_matching_amount_returns_a_normal_result():
 
     assert result.disposition == "no_match"
     assert result.rows_examined == 2
-    assert "Concern: No Bill on File" in result.reply_template
+    assert "We could not locate a bill matching claim" in result.reply_template
     assert workflow.search_calls == 1
     assert workflow.rows_selected == [0, 1]
 

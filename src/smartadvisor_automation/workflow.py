@@ -623,7 +623,6 @@ def build_reply_template(
     received_date: str | None = None,
     bill_name: str = "",
 ) -> str:
-    header = "To: Requestor\nSubject: Bill Status Response\n\n"
     if disposition == "no_claim_on_file":
         provided_values = {
             "claim_id": claim_id,
@@ -636,16 +635,14 @@ def build_reply_template(
             for label, key in NO_CLAIM_ON_FILE_REQUEST_FIELDS
             if not str(provided_values.get(key, "")).strip()
         ]
-        body = (
+        return (
             "\n".join([NO_CLAIM_ON_FILE_EMAIL_INTRO, "", *missing_fields])
             if missing_fields
             else NO_CLAIM_ON_FILE_EMAIL_INTRO
         )
-        return header + "Concern: No Claim on File\n\n" + body
     if disposition == "no_match":
         return (
-            header + "Concern: No Bill on File\n\n"
-            + f"We could not locate a bill matching claim {claim_id}, "
+            f"We could not locate a bill matching claim {claim_id}, "
             + f"DOS {dos_from}, and billed amount {expected_amount}.\n"
             + "Please resubmit the bill with the supporting medical reports."
         )
