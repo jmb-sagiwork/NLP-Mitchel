@@ -57,16 +57,28 @@ OUTCOME_MESSAGE = (
     "There is not a bill on file that matches this date of service and "
     "billed amount. Please resubmit the bill with medical reports to:"
 )
-NO_CLAIM_ON_FILE_EMAIL_INTRO = (
-    "Hello, Thank you for your inquiry, unfortunitely additional information "
-    "is need insurance carrier."
+NO_CLAIM_ON_FILE_REPLY = (
+    "Hello,\n"
+    "\n"
+    "Thank you for your inquiry. Unfortunately, additional information is "
+    "needed to answer your question. Please send a new email with the "
+    "following information listed.\n"
+    "\n"
+    "Insurance Carrier:\n"
+    "\n"
+    "Claim #:\n"
+    "\n"
+    "Date of Service:\n"
+    "\n"
+    "Claimant Name:\n"
+    "\n"
+    "Date of Injury:\n"
+    "\n"
+    "Total Billed Amount:\n"
+    "\n"
+    "Provider tax ID :"
 )
-NO_CLAIM_ON_FILE_REQUEST_FIELDS = (
-    ("Claim #:", "claim_id"),
-    ("Date of service:", "dos_from"),
-    ("Total Billed Amount :", "expected_amount"),
-    ("Provider Tax ID :", "prov_tin"),
-)
+NO_BILL_ON_FILE_ADDRESS = "PO Box 89404\nCleveland, OH 44101"
 MAX_ITERATIONS = 500
 HISTORY_TAB_READY_TIMEOUT = 25.0
 MINIMUM_SUCCESSFUL_SEARCH_FIELDS = 2
@@ -624,27 +636,17 @@ def build_reply_template(
     bill_name: str = "",
 ) -> str:
     if disposition == "no_claim_on_file":
-        provided_values = {
-            "claim_id": claim_id,
-            "dos_from": dos_from,
-            "expected_amount": expected_amount,
-            "prov_tin": prov_tin,
-        }
-        missing_fields = [
-            label
-            for label, key in NO_CLAIM_ON_FILE_REQUEST_FIELDS
-            if not str(provided_values.get(key, "")).strip()
-        ]
-        return (
-            "\n".join([NO_CLAIM_ON_FILE_EMAIL_INTRO, "", *missing_fields])
-            if missing_fields
-            else NO_CLAIM_ON_FILE_EMAIL_INTRO
-        )
+        return NO_CLAIM_ON_FILE_REPLY
     if disposition == "no_match":
+        amount_text = (
+            expected_amount
+            if str(expected_amount).startswith("$")
+            else f"${expected_amount}"
+        )
         return (
-            f"We could not locate a bill matching claim {claim_id}, "
-            + f"DOS {dos_from}, and billed amount {expected_amount}.\n"
-            + "Please resubmit the bill with the supporting medical reports."
+            f"Hello, There is not a bill on file that matches date of service "
+            f"{dos_from} and billed amount {amount_text}. Please Resubmit the "
+            f"bill with medical reports to: {NO_BILL_ON_FILE_ADDRESS}"
         )
     name = bill_name or claim_id
     if disposition == "denied":

@@ -52,7 +52,10 @@ def test_reply_templates_cover_no_match_denied_and_paid():
         **common,
     )
 
-    assert "We could not locate a bill matching claim" in no_match
+    assert (
+        "There is not a bill on file that matches date of service 08/01/2026 "
+        "and billed amount $527.00." in no_match
+    )
     assert "has been completed processing and denied" in denied
     assert "Denial Reason : Bill has been denied with CO-16." in denied
     assert "has been completed processing and paid" in paid
@@ -98,7 +101,10 @@ def test_no_matching_amount_returns_a_normal_result():
 
     assert result.disposition == "no_match"
     assert result.rows_examined == 2
-    assert "We could not locate a bill matching claim" in result.reply_template
+    assert (
+        "There is not a bill on file that matches date of service 08/01/2026 "
+        "and billed amount $527.00." in result.reply_template
+    )
     assert workflow.search_calls == 1
     assert workflow.rows_selected == [0, 1]
 
