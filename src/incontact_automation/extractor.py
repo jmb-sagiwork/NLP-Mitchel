@@ -70,15 +70,13 @@ ASSIGNED_EMAIL_SUBJECT_XPATHS = (
     '//*[@id="email-container"]//input',
 )
 ASSIGNED_EMAIL_BODY_IFRAME_XPATHS = (
+    "//iframe[contains(concat(' ', normalize-space(@class), ' '), ' email-body ')]",
+    "//iframe[@aria-label='Email Body']",
     "/html/body/div[1]/div/div[3]/div[3]/div[1]/div[2]/div/div/div[2]/div/div/div"
     "/div[1]/div[5]/iframe",
     '//*[@id="email-container"]/div[5]/iframe',
 )
-ASSIGNED_EMAIL_BODY_XPATHS = (
-    "/html/body",
-    "/html/body/div[1]",
-    "/html/body/div[1]/p[2]",
-)
+ASSIGNED_EMAIL_BODY_XPATHS = ("/html/body",)
 REPLY_BUTTON_XPATHS = (
     '//*[@id="email-container"]/div[4]/div[2]/button[3]',
     '//*[@id="email-container"]/div[4]/div[2]/button[3]/svg',
