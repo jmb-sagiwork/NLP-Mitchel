@@ -15,11 +15,15 @@ class FakeExtractor:
     def __init__(self, emails):
         self.emails = emails
         self.closed = False
+        self.replies_sent = []
 
     def extract(self, control, progress):
         progress(0, len(self.emails), "extracting")
         progress(len(self.emails), len(self.emails), "extracted")
         return self.emails
+
+    def send_reply(self, reply_text):
+        self.replies_sent.append(reply_text)
 
     def close(self):
         self.closed = True
@@ -56,6 +60,9 @@ class OrderedExtractor:
             self.order.append(f"extract:{email.message_id}")
             progress(index, total, "extracted")
             yield email
+
+    def send_reply(self, reply_text):
+        self.order.append(f"send:{reply_text}")
 
     def close(self):
         self.closed = True
@@ -138,13 +145,17 @@ def test_each_email_finishes_before_the_next_email_is_extracted(monkeypatch):
         order.append(f"nlp:{kwargs['message_key']}")
         return bill_result()
 
+    def approve_reply(reply):
+        order.append(reply)
+        return True
+
     monkeypatch.setattr("mitchel_pipeline.orchestrator.classify_email", classify)
     orchestrator = PipelineOrchestrator(
         extractor,
         enable_minilm=False,
         helper=helper,
         engine=object(),
-        on_reply=order.append,
+        on_reply=approve_reply,
     )
 
     summary = orchestrator.run(RunControl())
@@ -154,11 +165,43 @@ def test_each_email_finishes_before_the_next_email_is_extracted(monkeypatch):
         "nlp:email-1",
         "smartadvisor:email-1",
         "reply:email-1",
+        "send:reply:email-1",
         "extract:email-2",
         "nlp:email-2",
         "smartadvisor:email-2",
         "reply:email-2",
+        "send:reply:email-2",
     ]
     assert summary.extracted == 2
     assert summary.jobs_completed == 2
     assert extractor.closed and helper.closed
+
+
+def test_declining_the_reply_stops_the_run_without_sending(monkeypatch):
+    emails = [
+        ExtractedEmail("email-1", "Bill 1", "body 1", Path("email-1.txt")),
+        ExtractedEmail("email-2", "Bill 2", "body 2", Path("email-2.txt")),
+    ]
+    order = []
+    extractor = OrderedExtractor(emails, order)
+    helper = OrderedHelper(order)
+
+    monkeypatch.setattr(
+        "mitchel_pipeline.orchestrator.classify_email", lambda *a, **k: bill_result()
+    )
+    events = []
+    orchestrator = PipelineOrchestrator(
+        extractor,
+        enable_minilm=False,
+        helper=helper,
+        engine=object(),
+        emit=events.append,
+        on_reply=lambda _reply: False,
+    )
+
+    summary = orchestrator.run(RunControl())
+
+    assert not any(entry.startswith("send:") for entry in order)
+    assert "extract:email-2" not in order
+    assert extractor.closed and helper.closed
+    assert events[-1].kind == "status" and events[-1].message == "Run cancelled"

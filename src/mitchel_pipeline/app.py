@@ -158,6 +158,7 @@ class MitchelApp(QWidget):
     POLL_MS = 75
 
     dialog_requested = Signal(str, str, object)
+    confirm_requested = Signal(str, str, object, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -180,6 +181,7 @@ class MitchelApp(QWidget):
         self.closing = False
         self.dialog_events: list[threading.Event] = []
         self.dialog_requested.connect(self._show_dialog_now)
+        self.confirm_requested.connect(self._show_confirm_now)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -332,6 +334,29 @@ class MitchelApp(QWidget):
         finally:
             complete.set()
 
+    def _blocking_confirm(self, title: str, message: str) -> bool:
+        """Ask the operator to approve/decline from the worker thread; block until answered."""
+
+        complete = threading.Event()
+        self.dialog_events.append(complete)
+        result_holder: list[bool] = [False]
+        self.confirm_requested.emit(title, message, result_holder, complete)
+        while not complete.wait(0.1):
+            if self.control is None or self.control.cancelled:
+                return False
+        return result_holder[0]
+
+    def _show_confirm_now(
+        self, title: str, message: str, result_holder: list, complete: threading.Event
+    ) -> None:
+        if self.closing:
+            complete.set()
+            return
+        try:
+            result_holder[0] = dialogs.show_confirm(self, title, message)
+        finally:
+            complete.set()
+
     def _show_extracted(self, email: ExtractedEmail) -> None:
         if not self.extracted_popup_enabled.is_set():
             return
@@ -349,8 +374,12 @@ class MitchelApp(QWidget):
             format_nlp_output(result),
         )
 
-    def _show_reply(self, reply: str) -> None:
-        self._blocking_messagebox("Simulated email reply", reply)
+    def _show_reply(self, reply: str) -> bool:
+        return self._blocking_confirm(
+            "Approve reply?",
+            f"Approve to paste this reply and Park the email. Decline to stop the run "
+            f"immediately.\n\n{reply}",
+        )
 
     def _show_layers(self, layers_used: tuple[str, ...]) -> None:
         names = {

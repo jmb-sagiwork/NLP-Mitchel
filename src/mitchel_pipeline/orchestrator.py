@@ -16,7 +16,7 @@ from .run_control import RunCancelled, RunControl
 EventCallback = Callable[[PipelineEvent], None]
 ExtractedCallback = Callable[[ExtractedEmail], None]
 NlpCallback = Callable[[dict[str, object]], None]
-ReplyCallback = Callable[[str], None]
+ReplyCallback = Callable[[str], bool]
 LayersCallback = Callable[[tuple[str, ...]], None]
 
 MANUAL_REVIEW_REPLY = (
@@ -85,10 +85,24 @@ class PipelineOrchestrator:
         self.engine = engine
         self.on_extracted = on_extracted or (lambda _email: None)
         self.on_nlp = on_nlp or (lambda _result: None)
-        self.on_reply = on_reply or (lambda _reply: None)
+        self.on_reply = on_reply or (lambda _reply: True)
         self.on_layers = on_layers or (lambda _layers: None)
         self.skip_count = max(skip_count, 0)
         self._progress = 0.0
+
+    def _approve_or_stop(self, reply: str, control: RunControl, summary: RunSummary) -> None:
+        """Ask the operator to approve the generated reply; stop the run on decline."""
+
+        if self.on_reply(reply):
+            return
+        self._event(
+            "status",
+            "Run stopped: reply declined",
+            self._progress,
+            summary.to_dict(),
+        )
+        control.cancel()
+        raise RunCancelled()
 
     def _event(
         self,
@@ -171,7 +185,7 @@ class PipelineOrchestrator:
                             "error_code": type(exc).__name__,
                         }
                     )
-                    self.on_reply(MANUAL_REVIEW_REPLY)
+                    self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
                     self.extractor.send_reply(MANUAL_REVIEW_REPLY)
                     self._event(
                         "summary",
@@ -190,7 +204,7 @@ class PipelineOrchestrator:
 
                 if not jobs:
                     summary.skipped += 1
-                    self.on_reply(MANUAL_REVIEW_REPLY)
+                    self._approve_or_stop(MANUAL_REVIEW_REPLY, control, summary)
                     self.extractor.send_reply(MANUAL_REVIEW_REPLY)
                     self._event(
                         "summary",
@@ -231,7 +245,7 @@ class PipelineOrchestrator:
                         or "SmartAdvisor processing completed."
                     )
                     last_reply = reply
-                    self.on_reply(reply)
+                    self._approve_or_stop(reply, control, summary)
                     self.results_workbook.append_result(job, helper_result, reply_sent=True)
                     self._event(
                         "summary",
