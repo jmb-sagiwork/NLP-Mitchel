@@ -554,6 +554,7 @@
      "required": true,
      "pattern_ref": "currency_amount",
      "require_label": true,
+     "leader_prefix": true,
      "label_aliases": [
       "expected amount",
       "input - expected amount",
@@ -882,6 +883,7 @@
      "required": false,
      "pattern_ref": "currency_amount",
      "require_label": true,
+     "leader_prefix": true,
      "label_aliases": [
       "expected amount",
       "input - expected amount",

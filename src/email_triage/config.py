@@ -87,6 +87,10 @@ class CompiledField:
     # Dates and money overlap once us_date accepts dots: "03.11.1994" offers
     # "03.11" to currency_amount. The date wins and the money match is dropped.
     exclude_pattern: CompiledPattern | None = None
+    # Treat a run of 3+ dash/dot/underscore characters ("DOS: 07/10/2026----$1358.00")
+    # as a label anchor too. Providers use these leader runs in place of a label
+    # word when a value follows another field on the same line.
+    leader_prefix: bool = False
 
 
 @dataclass(frozen=True)
@@ -282,6 +286,7 @@ def _compile_field(
             )
         exclude_pattern = patterns[exclude_ref]
     multi_value = bool(spec.get("multi_value", False))
+    leader_prefix = bool(spec.get("leader_prefix", False))
     require_label = bool(spec.get("require_label", False))
     if require_label and not aliases:
         raise ConfigError(
@@ -299,6 +304,7 @@ def _compile_field(
         reject_prefix=reject_prefix,
         exclude_pattern=exclude_pattern,
         multi_value=multi_value,
+        leader_prefix=leader_prefix,
     )
 
 

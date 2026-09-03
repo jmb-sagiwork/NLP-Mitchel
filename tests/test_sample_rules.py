@@ -240,3 +240,17 @@ def test_multiple_claim_status_inquiries_keep_five_pairs(engine):
         "246.00", "357.00", "357.00", "579.00", "680.00"
     )
     assert len(r.line_items) == 5
+
+
+def test_dash_leader_line_is_read_as_a_label(rules_engine):
+    """Some providers connect DOS to the billed amount with a dash run instead
+    of a label word: "DOS: 07/10/2043-----------------$1358.00"."""
+    r = rules_engine.classify(
+        "Bill status for Claim # ZX8042719-6.\n"
+        "DOS: 07/10/2043-----------------$1358.00\n"
+    )
+    assert r.values["date_of_service"] == "2043-07-10"
+    assert r.values["expected_amount"] == "1358.00"
+    assert [item.fields for item in r.line_items] == [
+        {"date_of_service": "2043-07-10", "expected_amount": "1358.00"}
+    ]

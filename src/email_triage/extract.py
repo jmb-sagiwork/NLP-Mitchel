@@ -27,6 +27,9 @@ _LIST_MAX_LINES = 12
 # Exported tables often flatten as DOS / AMOUNT / NOTES followed by one value
 # per line. Two non-value lines may therefore sit between successive values.
 _LIST_MAX_GAP = 2
+# A run of dashes/dots/underscores standing in for a label word, e.g.
+# "DOS: 07/10/2026-----------------$1358.00".
+_LEADER_RUN = re.compile(r"[-._]{3,}")
 
 
 # --------------------------------------------------------------------------
@@ -172,6 +175,17 @@ def _label_spans(field: CompiledField, low: str) -> list[tuple[int, int, str]]:
     return spans
 
 
+def _leader_spans(text: str) -> list[tuple[int, int, str]]:
+    """Locate dash/dot/underscore leader runs, for fields opting into them.
+
+    A provider sometimes connects one field's value to the next with a run of
+    punctuation instead of a label word ("DOS: 07/10/2026-----------------
+    $1358.00"). Treating the run as a label anchor lets the value search reuse
+    the same window logic that follows a real label.
+    """
+    return [(m.start(), m.end(), "leader") for m in _LEADER_RUN.finditer(text)]
+
+
 def _list_after(field: CompiledField, text: str, start: int):
     """Yield pattern matches from a short list or flattened table.
 
@@ -259,6 +273,8 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
     for seg in prepared.segments:
         seg_w = _segment_priority(seg.kind)
         labels = _label_spans(field, seg.text.lower())
+        if field.leader_prefix:
+            labels = labels + _leader_spans(seg.text)
         claimed: list[tuple[int, int]] = []
 
         # --- label-anchored: search the window AFTER each label -------------
