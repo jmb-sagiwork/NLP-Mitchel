@@ -91,6 +91,11 @@ class CompiledField:
     # as a label anchor too. Providers use these leader runs in place of a label
     # word when a value follows another field on the same line.
     leader_prefix: bool = False
+    # When require_label found nothing, but this field's pattern matches exactly
+    # ONE place in the whole email, use that match anyway. A single figure has
+    # nothing else it could be; the ambiguity require_label guards against only
+    # exists once a second figure (billed/paid/check amount) is in play.
+    lone_value_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -293,6 +298,7 @@ def _compile_field(
             f"concern '{concern_id}', field '{name}': require_label is true but "
             f"no label_aliases are declared, so the field can never match"
         )
+    lone_value_fallback = bool(spec.get("lone_value_fallback", False))
     return CompiledField(
         name=name,
         display_name=spec.get("display_name", name.replace("_", " ").title()),
@@ -305,6 +311,7 @@ def _compile_field(
         exclude_pattern=exclude_pattern,
         multi_value=multi_value,
         leader_prefix=leader_prefix,
+        lone_value_fallback=lone_value_fallback,
     )
 
 

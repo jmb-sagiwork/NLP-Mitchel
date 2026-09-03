@@ -555,6 +555,7 @@
      "pattern_ref": "currency_amount",
      "require_label": true,
      "leader_prefix": true,
+     "lone_value_fallback": true,
      "label_aliases": [
       "expected amount",
       "input - expected amount",
@@ -884,6 +885,7 @@
      "pattern_ref": "currency_amount",
      "require_label": true,
      "leader_prefix": true,
+     "lone_value_fallback": true,
      "label_aliases": [
       "expected amount",
       "input - expected amount",

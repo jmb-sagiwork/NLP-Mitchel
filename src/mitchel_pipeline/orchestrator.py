@@ -20,9 +20,6 @@ ReplyCallback = Callable[[str], str]
 LayersCallback = Callable[[tuple[str, ...]], None]
 
 MANUAL_REVIEW_REPLY = (
-    "To: Requestor\n"
-    "Subject: Bill Status Response\n\n"
-    "Concern: Manual Review Required\n\n"
     "We could not create a complete SmartAdvisor lookup from this email. "
     "Please review the extracted email and NLP output."
 )

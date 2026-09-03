@@ -64,6 +64,11 @@ unanchored one would silently satisfy a required field with the wrong number
 and stop the email routing for review. Prose aliases (`charge`, `charge was`,
 `amount of`) keep "The charge was $1,250.00" working.
 
+`lone_value_fallback: true` relaxes that guard in the one case it can't hurt:
+when the whole email has exactly one `$` figure and no label claims it, there
+is nothing else it could be, so it counts anyway. Once a second figure shows
+up, `require_label` is back in full force.
+
 ### The five rows that still route to review
 
 All five are correct behaviour, not misses:

@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, replace
 
 from .config import CompiledConcern, CompiledField, Config
-from .textprep import PreparedText
+from .textprep import PreparedText, TextSegment
 from .types import FieldValue, LineItem, Segment
 
 # How far after a label to look for the value.
@@ -270,6 +270,25 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
     if field.pattern is None:
         return []
     out: list[Candidate] = []
+
+    # A field opted into lone_value_fallback (e.g. expected_amount) still needs
+    # require_label's protection once a SECOND figure is in play - billed, paid,
+    # and check amount are easy to confuse. But when the whole email carries
+    # only one match for this pattern, there is nothing else it could be, so
+    # the label requirement is pointless caution. Counted up front, before the
+    # label search below can claim it, so a labelled lone value is unaffected.
+    lone_match: tuple[TextSegment, str, int, int] | None = None
+    if field.lone_value_fallback:
+        found: list[tuple[TextSegment, str, int, int]] = []
+        for seg in prepared.segments:
+            blocked = _blocked_spans(field, seg.text)
+            for raw, (s, e) in field.pattern.finditer(seg.text):
+                if any(s < be and e > bs for bs, be in blocked):
+                    continue
+                found.append((seg, raw, s, e))
+        if len(found) == 1:
+            lone_match = found[0]
+
     for seg in prepared.segments:
         seg_w = _segment_priority(seg.kind)
         labels = _label_spans(field, seg.text.lower())
@@ -364,6 +383,21 @@ def _collect(field: CompiledField, prepared: PreparedText, cfg: Config) -> list[
                     segment=seg.kind,
                     strategy="pattern_only",
                     score=round(seg_w * (0.30 + 0.15 * position), 4),
+                )
+            )
+
+    if not out and lone_match is not None:
+        seg, raw, s, e = lone_match
+        value = normalize_value(raw, field.normalizer)
+        if value:
+            out.append(
+                Candidate(
+                    raw=raw,
+                    value=value,
+                    span=(seg.offset + s, seg.offset + e),
+                    segment=seg.kind,
+                    strategy="lone_value_fallback",
+                    score=round(_segment_priority(seg.kind) * 0.60, 4),
                 )
             )
     return out

@@ -143,15 +143,29 @@ def test_amount_is_found_from_prose_not_only_from_a_label_line(rules_engine):
     assert r.values["expected_amount"] == "1250.00"
 
 
-def test_unlabelled_amount_is_refused(rules_engine):
-    """expected_amount became required in config 0.3.0, so it sets require_label.
+def test_lone_unlabelled_amount_is_treated_as_expected_amount(rules_engine):
+    """One $ figure in the whole email is nothing else it could be (lone_value_fallback).
 
-    A real email carries several figures - billed, paid, check amount. Grabbing
+    This reverses the config 0.3.0 refusal for the single-figure case, by the
+    user's explicit ruling: "if there is only one $ sign then treat it as the
+    expected amount". The refusal still stands once a SECOND figure is in
+    play - see test_unlabelled_amount_is_refused_when_multiple_figures_exist.
+    """
+    r = rules_engine.classify(
+        "Bill status for claim ID WC1234567, DOS 03/14/2026. See $1,250.00 below."
+    )
+    assert r.values["expected_amount"] == "1250.00"
+    assert "expected_amount" not in r.missing_fields
+
+
+def test_unlabelled_amount_is_refused_when_multiple_figures_exist(rules_engine):
+    """A real email carries several figures - billed, paid, check amount. Grabbing
     an unanchored one would silently satisfy a REQUIRED field with the wrong
     number and stop the email routing for review, which is worse than a blank.
     """
     r = rules_engine.classify(
-        "Bill status for claim ID WC1234567, DOS 03/14/2026. See $1,250.00 below."
+        "Bill status for claim ID WC1234567, DOS 03/14/2026. "
+        "See $1,250.00 and $310.45 below."
     )
     assert r.values["expected_amount"] is None
     assert "expected_amount" in r.missing_fields
